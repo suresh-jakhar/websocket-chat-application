@@ -1,12 +1,32 @@
-import express from "express";
 import { WebSocketServer } from "ws";
 
-const app = express();
-const server = app.listen(3000);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ port: 8080 });
 
-wss.on("connection", ws =>
-  ws.on("message", msg =>
-    wss.clients.forEach(c => c.send(msg.toString()))
-  )
-);
+let userCount = 0;
+let clients = []; 
+
+wss.on("connection", (socket) => {
+    userCount++;
+    clients.push(socket);
+
+    console.log("Users connected:", userCount);
+
+    socket.on("message", (event) => {
+        const message = event.toString();
+        console.log("Message received:", message);
+
+        clients.forEach((client) => {
+            if (client.readyState === 1) { 
+                client.send(message + " : broadcast from server");
+            }
+        });
+    });
+
+    socket.on("close", () => {
+        userCount--;
+
+        clients = clients.filter((client) => client !== socket);
+
+        console.log("Users connected:", userCount);
+    });
+});
