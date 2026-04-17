@@ -1,94 +1,101 @@
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 
 const wss = new WebSocketServer({ port: 8080 });
 
-let userCount = 0;
+// ==================== DATA STRUCTURES ====================
 
-type SocketEntry = {
+// Room counter for auto-incrementing room IDs
+let roomCounter = 0;
+
+// All active rooms: roomId -> Set of users in that room
+type User = {
     socket: WebSocket;
-    roomId: string | null;
+    anonymousId: string;
+    nickname: string;
+    socketId: string;
 };
 
-type IncomingMessage = {
-    type: "join" | "chat";
-    payload?: {
-        roomId?: string;
-        message?: string;
-    };
-};
+const rooms = new Map<number, Set<User>>();
 
-let clients: SocketEntry[] = [];
+// Quick lookup: socketId -> roomId
+const userToRoom = new Map<string, number>();
+
+// ==================== TYPE DEFINITIONS ====================
+
+type IncomingMessage =
+    | { type: "CREATE_ROOM"; payload: { anonymousId: string; nickname: string } }
+    | { type: "JOIN_ROOM"; payload: { roomId: number; anonymousId: string; nickname: string } }
+    | { type: "LEAVE_ROOM"; payload: { roomId: number } }
+    | { type: "SEND_MESSAGE"; payload: { message: string } }
+    | { type: "GET_ROOMS"; payload?: object };
+
+type OutgoingMessage =
+    | { type: "ERROR"; payload: { error: string } }
+    | { type: "SUCCESS"; payload: { message: string; [key: string]: unknown } }
+    | { type: "ROOM_CREATED"; payload: { roomId: number } }
+    | { type: "ROOM_JOINED"; payload: { roomId: number; userCount: number } }
+    | { type: "USER_JOINED"; payload: { anonymousId: string; nickname: string; userCount: number } }
+    | { type: "USER_LEFT"; payload: { anonymousId: string; nickname: string; userCount: number } }
+    | { type: "MESSAGE"; payload: { anonymousId: string; nickname: string; message: string; timestamp: string } }
+    | { type: "ROOM_LIST"; payload: { rooms: Array<{ roomId: number; userCount: number }> } };
+
+// ==================== HELPERS ====================
+
+function generateSocketId(): string {
+    return `socket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function sendMessage(socket: WebSocket, message: OutgoingMessage) {
+    if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+    }
+}
+
+function broadcastToRoom(roomId: number, message: OutgoingMessage, excludeSocket?: WebSocket) {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    room.forEach((user) => {
+        if (excludeSocket && user.socket === excludeSocket) return;
+        sendMessage(user.socket, message);
+    });
+}
+
+// ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
-    userCount++;
-    clients.push({ socket, roomId: null });
+    const socketId = generateSocketId();
+    console.log(`[Connection] ${socketId} connected. Total connections: ${wss.clients.size}`);
 
-    console.log("Users connected:", userCount);
- 
-    socket.on("message", (event) => {
-        const rawMessage = event.toString();
-
-        let parsedMessage: IncomingMessage;
+    socket.on("message", (data) => {
         try {
-            parsedMessage = JSON.parse(rawMessage) as IncomingMessage;
-        } catch {
-            socket.send(JSON.stringify({ error: "Invalid JSON message format" }));
-            return;
-        }
+            const parsedMessage = JSON.parse(data.toString()) as IncomingMessage;
+            console.log(`[Message] ${socketId} sent:`, parsedMessage.type);
 
-        if (parsedMessage.type === "join") {
-            const roomId = parsedMessage.payload?.roomId;
-            if (!roomId) {
-                socket.send(JSON.stringify({ error: "roomId is required for join" }));
-                return;
-            }
-
-            clients = clients.map((client) => {
-                if (client.socket === socket) {
-                    return { ...client, roomId };
-                }
-                return client;
+            // Handlers will be implemented in later plans
+            // For now, just acknowledge
+            sendMessage(socket, {
+                type: "SUCCESS",
+                payload: { message: "Handler not yet implemented" },
             });
-
-            socket.send(JSON.stringify({ type: "joined", payload: { roomId } }));
-            return;
-        }
-
-        if (parsedMessage.type === "chat") {
-            const sender = clients.find((client) => client.socket === socket);
-            const message = parsedMessage.payload?.message;
-
-            if (!sender?.roomId) {
-                socket.send(JSON.stringify({ error: "Join a room before chatting" }));
-                return;
-            }
-
-            if (!message) {
-                socket.send(JSON.stringify({ error: "message is required for chat" }));
-                return;
-            }
-
-            clients.forEach((client) => {
-                if (client.roomId === sender.roomId && client.socket.readyState === 1) {
-                    client.socket.send(
-                        JSON.stringify({
-                            type: "chat",
-                            payload: {
-                                roomId: sender.roomId,
-                                message
-                            }
-                        })
-                    );
-                }
+        } catch (error) {
+            console.error(`[Error] ${socketId} sent invalid JSON:`, error);
+            sendMessage(socket, {
+                type: "ERROR",
+                payload: { error: "Invalid JSON format" },
             });
         }
     });
 
     socket.on("close", () => {
-        userCount--; 
+        console.log(`[Disconnect] ${socketId} disconnected`);
+        userToRoom.delete(socketId);
+        // Cleanup will be implemented in Plan 5
+    });
 
-        clients = clients.filter((client) => client.socket !== socket);
-
-        console.log("Users connected:", userCount);
+    socket.on("error", (error) => {
+        console.error(`[Error] ${socketId} socket error:`, error);
     });
 });
+
+console.log("WebSocket server started on port 8080");
