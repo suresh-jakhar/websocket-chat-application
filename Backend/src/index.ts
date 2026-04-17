@@ -61,6 +61,30 @@ function broadcastToRoom(roomId: number, message: OutgoingMessage, excludeSocket
     });
 }
 
+function validateNickname(nickname: string): { valid: boolean; error?: string } {
+    if (!nickname || typeof nickname !== "string") {
+        return { valid: false, error: "Nickname is required" };
+    }
+    const trimmed = nickname.trim();
+    if (trimmed.length === 0) {
+        return { valid: false, error: "Nickname cannot be empty" };
+    }
+    if (trimmed.length > 30) {
+        return { valid: false, error: "Nickname must be 30 characters or less" };
+    }
+    return { valid: true };
+}
+
+function validateAnonymousId(anonymousId: string): { valid: boolean; error?: string } {
+    if (!anonymousId || typeof anonymousId !== "string") {
+        return { valid: false, error: "anonymousId is required" };
+    }
+    if (anonymousId.trim().length === 0) {
+        return { valid: false, error: "anonymousId cannot be empty" };
+    }
+    return { valid: true };
+}
+
 // ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
@@ -72,12 +96,54 @@ wss.on("connection", (socket) => {
             const parsedMessage = JSON.parse(data.toString()) as IncomingMessage;
             console.log(`[Message] ${socketId} sent:`, parsedMessage.type);
 
-            // Handlers will be implemented in later plans
-            // For now, just acknowledge
-            sendMessage(socket, {
-                type: "SUCCESS",
-                payload: { message: "Handler not yet implemented" },
-            });
+            // ==================== CREATE_ROOM HANDLER ====================
+            if (parsedMessage.type === "CREATE_ROOM") {
+                const { anonymousId, nickname } = parsedMessage.payload;
+
+                // Validate anonymousId
+                const anonValidation = validateAnonymousId(anonymousId);
+                if (!anonValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: anonValidation.error! },
+                    });
+                    return;
+                }
+
+                // Validate nickname
+                const nickValidation = validateNickname(nickname);
+                if (!nickValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: nickValidation.error! },
+                    });
+                    return;
+                }
+
+                // Create new room
+                roomCounter++;
+                const newRoomId = roomCounter;
+                const newRoom = new Set<User>();
+                rooms.set(newRoomId, newRoom);
+
+                console.log(
+                    `[CREATE_ROOM] Room ${newRoomId} created by ${nickname} (${anonymousId})`
+                );
+
+                // Send success response
+                sendMessage(socket, {
+                    type: "ROOM_CREATED",
+                    payload: { roomId: newRoomId },
+                });
+            }
+
+            // Placeholder for other handlers
+            else {
+                sendMessage(socket, {
+                    type: "ERROR",
+                    payload: { error: `Handler for ${parsedMessage.type} not yet implemented` },
+                });
+            }
         } catch (error) {
             console.error(`[Error] ${socketId} sent invalid JSON:`, error);
             sendMessage(socket, {
