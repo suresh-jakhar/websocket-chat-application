@@ -2,12 +2,8 @@ import { WebSocketServer, WebSocket } from "ws";
 
 const wss = new WebSocketServer({ port: 8080 });
 
-// ==================== DATA STRUCTURES ====================
-
-// Room counter for auto-incrementing room IDs
 let roomCounter = 0;
 
-// All active rooms: roomId -> Set of users in that room
 type User = {
     socket: WebSocket;
     anonymousId: string;
@@ -16,11 +12,7 @@ type User = {
 };
 
 const rooms = new Map<number, Set<User>>();
-
-// Quick lookup: socketId -> roomId
 const userToRoom = new Map<string, number>();
-
-// ==================== TYPE DEFINITIONS ====================
 
 type IncomingMessage =
     | { type: "CREATE_ROOM"; payload: { anonymousId: string; nickname: string } }
@@ -38,8 +30,6 @@ type OutgoingMessage =
     | { type: "USER_LEFT"; payload: { anonymousId: string; nickname: string; userCount: number } }
     | { type: "MESSAGE"; payload: { anonymousId: string; nickname: string; message: string; timestamp: string } }
     | { type: "ROOM_LIST"; payload: { rooms: Array<{ roomId: number; userCount: number }> } };
-
-// ==================== HELPERS ====================
 
 function generateSocketId(): string {
     return `socket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -141,7 +131,6 @@ function removeUserFromRoom(socketId: string): { roomId: number; userCount: numb
 
     const userCount = room.size;
 
-    // Delete room if empty
     if (userCount === 0) {
         rooms.delete(roomId);
         console.log(`[ROOM_CLEANUP] Room ${roomId} deleted (empty)`);
@@ -149,8 +138,6 @@ function removeUserFromRoom(socketId: string): { roomId: number; userCount: numb
 
     return { roomId, userCount, user: userToRemove };
 }
-
-// ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
     const socketId = generateSocketId();
@@ -165,10 +152,8 @@ wss.on("connection", (socket) => {
                 return;
             }
 
-            console.log(`[Message] ${socketId} sent:`, parsedMessage.type);
             const payload = isRecord(parsedMessage.payload) ? parsedMessage.payload : null;
 
-            // ==================== CREATE_ROOM HANDLER ====================
             if (parsedMessage.type === "CREATE_ROOM") {
                 if (!payload) {
                     sendValidationError(socket, "Payload is required");
@@ -183,39 +168,29 @@ wss.on("connection", (socket) => {
                     return;
                 }
 
-                // Validate anonymousId
                 const anonValidation = validateAnonymousId(anonymousId);
                 if (!anonValidation.valid) {
                     sendValidationError(socket, anonValidation.error!);
                     return;
                 }
 
-                // Validate nickname
                 const nickValidation = validateNickname(nickname);
                 if (!nickValidation.valid) {
                     sendValidationError(socket, nickValidation.error!);
                     return;
                 }
 
-                // Create new room
                 roomCounter++;
                 const newRoomId = roomCounter;
-                const newRoom = new Set<User>();
-                rooms.set(newRoomId, newRoom);
+                rooms.set(newRoomId, new Set<User>());
 
-                console.log(
-                    `[CREATE_ROOM] Room ${newRoomId} created by ${nickname} (${anonymousId})`
-                );
+                console.log(`[CREATE_ROOM] Room ${newRoomId} created by ${nickname} (${anonymousId})`);
 
-                // Send success response
                 sendMessage(socket, {
                     type: "ROOM_CREATED",
                     payload: { roomId: newRoomId },
                 });
-            }
-
-            // ==================== JOIN_ROOM HANDLER ====================
-            else if (parsedMessage.type === "JOIN_ROOM") {
+            } else if (parsedMessage.type === "JOIN_ROOM") {
                 if (!payload) {
                     sendValidationError(socket, "Payload is required");
                     return;
@@ -235,28 +210,24 @@ wss.on("connection", (socket) => {
                     return;
                 }
 
-                // Validate roomId
                 const roomValidation = validateRoomId(roomId);
                 if (!roomValidation.valid) {
                     sendValidationError(socket, roomValidation.error!);
                     return;
                 }
 
-                // Validate anonymousId
                 const anonValidation = validateAnonymousId(anonymousId);
                 if (!anonValidation.valid) {
                     sendValidationError(socket, anonValidation.error!);
                     return;
                 }
 
-                // Validate nickname
                 const nickValidation = validateNickname(nickname);
                 if (!nickValidation.valid) {
                     sendValidationError(socket, nickValidation.error!);
                     return;
                 }
 
-                // Add user to room
                 const room = rooms.get(roomId)!;
                 const user: User = {
                     socket,
@@ -264,22 +235,19 @@ wss.on("connection", (socket) => {
                     nickname,
                     socketId,
                 };
+
                 room.add(user);
                 userToRoom.set(socketId, roomId);
 
                 const userCount = room.size;
 
-                console.log(
-                    `[JOIN_ROOM] User ${nickname} (${anonymousId}) joined Room ${roomId}. Total users: ${userCount}`
-                );
+                console.log(`[JOIN_ROOM] User ${nickname} (${anonymousId}) joined Room ${roomId}. Total users: ${userCount}`);
 
-                // Send confirmation to joining user
                 sendMessage(socket, {
                     type: "ROOM_JOINED",
                     payload: { roomId, userCount },
                 });
 
-                // Broadcast USER_JOINED to all other users in room
                 broadcastToRoom(
                     roomId,
                     {
@@ -292,10 +260,7 @@ wss.on("connection", (socket) => {
                     },
                     socket
                 );
-            }
-
-            // ==================== SEND_MESSAGE HANDLER ====================
-            else if (parsedMessage.type === "SEND_MESSAGE") {
+            } else if (parsedMessage.type === "SEND_MESSAGE") {
                 if (!payload) {
                     sendValidationError(socket, "Payload is required");
                     return;
@@ -308,24 +273,18 @@ wss.on("connection", (socket) => {
                     return;
                 }
 
-                // Validate message
                 const msgValidation = validateMessage(messageText);
                 if (!msgValidation.valid) {
                     sendValidationError(socket, msgValidation.error!);
                     return;
                 }
 
-                // Find user's room
                 const userRoomId = userToRoom.get(socketId);
                 if (!userRoomId) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: "You must join a room before sending messages" },
-                    });
+                    sendValidationError(socket, "You must join a room before sending messages");
                     return;
                 }
 
-                // Find sender user object to get anonymousId and nickname
                 const room = rooms.get(userRoomId)!;
                 let senderUser: User | undefined;
                 room.forEach((user) => {
@@ -335,20 +294,14 @@ wss.on("connection", (socket) => {
                 });
 
                 if (!senderUser) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: "User not found in room" },
-                    });
+                    sendValidationError(socket, "User not found in room");
                     return;
                 }
 
                 const timestamp = new Date().toISOString();
 
-                console.log(
-                    `[SEND_MESSAGE] ${senderUser.nickname} (${senderUser.anonymousId}) in Room ${userRoomId}: ${messageText.trim()}`
-                );
+                console.log(`[SEND_MESSAGE] ${senderUser.nickname} (${senderUser.anonymousId}) in Room ${userRoomId}: ${messageText.trim()}`);
 
-                // Broadcast message to all users in room
                 broadcastToRoom(userRoomId, {
                     type: "MESSAGE",
                     payload: {
@@ -358,10 +311,7 @@ wss.on("connection", (socket) => {
                         timestamp,
                     },
                 });
-            }
-
-            // ==================== LEAVE_ROOM HANDLER ====================
-            else if (parsedMessage.type === "LEAVE_ROOM") {
+            } else if (parsedMessage.type === "LEAVE_ROOM") {
                 if (payload && typeof payload.roomId !== "undefined" && typeof payload.roomId !== "number") {
                     sendValidationError(socket, "roomId must be a number");
                     return;
@@ -376,11 +326,8 @@ wss.on("connection", (socket) => {
 
                 const { roomId, userCount, user } = result;
 
-                console.log(
-                    `[LEAVE_ROOM] User ${user.nickname} (${user.anonymousId}) left Room ${roomId}. Remaining users: ${userCount}`
-                );
+                console.log(`[LEAVE_ROOM] User ${user.nickname} (${user.anonymousId}) left Room ${roomId}. Remaining users: ${userCount}`);
 
-                // Broadcast USER_LEFT to remaining users
                 if (userCount > 0) {
                     broadcastToRoom(roomId, {
                         type: "USER_LEFT",
@@ -396,10 +343,7 @@ wss.on("connection", (socket) => {
                     type: "SUCCESS",
                     payload: { message: "Left room" },
                 });
-            }
-
-            // ==================== GET_ROOMS HANDLER ====================
-            else if (parsedMessage.type === "GET_ROOMS") {
+            } else if (parsedMessage.type === "GET_ROOMS") {
                 const roomsList: Array<{ roomId: number; userCount: number }> = [];
 
                 rooms.forEach((room, roomId) => {
@@ -415,10 +359,7 @@ wss.on("connection", (socket) => {
                     type: "ROOM_LIST",
                     payload: { rooms: roomsList },
                 });
-            }
-
-            // Placeholder for other handlers
-            else {
+            } else {
                 sendMessage(socket, {
                     type: "ERROR",
                     payload: { error: `Handler for ${parsedMessage.type} not yet implemented` },
@@ -435,13 +376,12 @@ wss.on("connection", (socket) => {
 
     socket.on("close", () => {
         console.log(`[Disconnect] ${socketId} disconnected`);
-        
+
         const result = removeUserFromRoom(socketId);
-        
+
         if (result) {
             const { roomId, userCount, user } = result;
-            
-            // Broadcast USER_LEFT to remaining users if room still has people
+
             if (userCount > 0) {
                 broadcastToRoom(roomId, {
                     type: "USER_LEFT",
