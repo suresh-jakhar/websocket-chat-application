@@ -110,6 +110,13 @@ function sendValidationError(socket: WebSocket, error: string) {
     });
 }
 
+function formatUnknownError(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
+}
+
 function removeUserFromRoom(socketId: string): { roomId: number; userCount: number; user: User } | null {
     const roomId = userToRoom.get(socketId);
     if (!roomId) return null;
@@ -366,7 +373,7 @@ wss.on("connection", (socket) => {
                 });
             }
         } catch (error) {
-            console.error(`[Error] ${socketId} sent invalid JSON:`, error);
+            console.warn(`[Error] ${socketId} sent invalid JSON: ${formatUnknownError(error)}`);
             sendMessage(socket, {
                 type: "ERROR",
                 payload: { error: "Invalid JSON format" },
@@ -396,8 +403,20 @@ wss.on("connection", (socket) => {
     });
 
     socket.on("error", (error) => {
-        console.error(`[Error] ${socketId} socket error:`, error);
+        console.error(`[Error] ${socketId} socket error: ${formatUnknownError(error)}`);
     });
+});
+
+wss.on("error", (error) => {
+    console.error(`[Error] WebSocket server error: ${formatUnknownError(error)}`);
+});
+
+process.on("uncaughtException", (error) => {
+    console.error(`[Fatal] uncaughtException: ${formatUnknownError(error)}`);
+});
+
+process.on("unhandledRejection", (reason) => {
+    console.error(`[Fatal] unhandledRejection: ${formatUnknownError(reason)}`);
 });
 
 console.log("WebSocket server started on port 8080");
