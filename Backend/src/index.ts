@@ -85,6 +85,16 @@ function validateAnonymousId(anonymousId: string): { valid: boolean; error?: str
     return { valid: true };
 }
 
+function validateRoomId(roomId: unknown): { valid: boolean; error?: string } {
+    if (typeof roomId !== "number") {
+        return { valid: false, error: "roomId must be a number" };
+    }
+    if (!rooms.has(roomId)) {
+        return { valid: false, error: `Room ${roomId} does not exist` };
+    }
+    return { valid: true };
+}
+
 // ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
@@ -135,6 +145,78 @@ wss.on("connection", (socket) => {
                     type: "ROOM_CREATED",
                     payload: { roomId: newRoomId },
                 });
+            }
+
+            // ==================== JOIN_ROOM HANDLER ====================
+            else if (parsedMessage.type === "JOIN_ROOM") {
+                const { roomId, anonymousId, nickname } = parsedMessage.payload;
+
+                // Validate roomId
+                const roomValidation = validateRoomId(roomId);
+                if (!roomValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: roomValidation.error! },
+                    });
+                    return;
+                }
+
+                // Validate anonymousId
+                const anonValidation = validateAnonymousId(anonymousId);
+                if (!anonValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: anonValidation.error! },
+                    });
+                    return;
+                }
+
+                // Validate nickname
+                const nickValidation = validateNickname(nickname);
+                if (!nickValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: nickValidation.error! },
+                    });
+                    return;
+                }
+
+                // Add user to room
+                const room = rooms.get(roomId)!;
+                const user: User = {
+                    socket,
+                    anonymousId,
+                    nickname,
+                    socketId,
+                };
+                room.add(user);
+                userToRoom.set(socketId, roomId);
+
+                const userCount = room.size;
+
+                console.log(
+                    `[JOIN_ROOM] User ${nickname} (${anonymousId}) joined Room ${roomId}. Total users: ${userCount}`
+                );
+
+                // Send confirmation to joining user
+                sendMessage(socket, {
+                    type: "ROOM_JOINED",
+                    payload: { roomId, userCount },
+                });
+
+                // Broadcast USER_JOINED to all other users in room
+                broadcastToRoom(
+                    roomId,
+                    {
+                        type: "USER_JOINED",
+                        payload: {
+                            anonymousId,
+                            nickname,
+                            userCount,
+                        },
+                    },
+                    socket
+                );
             }
 
             // Placeholder for other handlers
