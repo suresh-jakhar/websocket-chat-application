@@ -109,6 +109,17 @@ function validateMessage(message: string): { valid: boolean; error?: string } {
     return { valid: true };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sendValidationError(socket: WebSocket, error: string) {
+    sendMessage(socket, {
+        type: "ERROR",
+        payload: { error },
+    });
+}
+
 function removeUserFromRoom(socketId: string): { roomId: number; userCount: number; user: User } | null {
     const roomId = userToRoom.get(socketId);
     if (!roomId) return null;
@@ -147,30 +158,42 @@ wss.on("connection", (socket) => {
 
     socket.on("message", (data) => {
         try {
-            const parsedMessage = JSON.parse(data.toString()) as IncomingMessage;
+            const parsedMessage = JSON.parse(data.toString()) as { type?: string; payload?: unknown };
+
+            if (!parsedMessage || typeof parsedMessage.type !== "string") {
+                sendValidationError(socket, "Message type is required");
+                return;
+            }
+
             console.log(`[Message] ${socketId} sent:`, parsedMessage.type);
+            const payload = isRecord(parsedMessage.payload) ? parsedMessage.payload : null;
 
             // ==================== CREATE_ROOM HANDLER ====================
             if (parsedMessage.type === "CREATE_ROOM") {
-                const { anonymousId, nickname } = parsedMessage.payload;
+                if (!payload) {
+                    sendValidationError(socket, "Payload is required");
+                    return;
+                }
+
+                const anonymousId = payload.anonymousId;
+                const nickname = payload.nickname;
+
+                if (typeof anonymousId !== "string" || typeof nickname !== "string") {
+                    sendValidationError(socket, "anonymousId and nickname are required");
+                    return;
+                }
 
                 // Validate anonymousId
                 const anonValidation = validateAnonymousId(anonymousId);
                 if (!anonValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: anonValidation.error! },
-                    });
+                    sendValidationError(socket, anonValidation.error!);
                     return;
                 }
 
                 // Validate nickname
                 const nickValidation = validateNickname(nickname);
                 if (!nickValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: nickValidation.error! },
-                    });
+                    sendValidationError(socket, nickValidation.error!);
                     return;
                 }
 
@@ -193,35 +216,43 @@ wss.on("connection", (socket) => {
 
             // ==================== JOIN_ROOM HANDLER ====================
             else if (parsedMessage.type === "JOIN_ROOM") {
-                const { roomId, anonymousId, nickname } = parsedMessage.payload;
+                if (!payload) {
+                    sendValidationError(socket, "Payload is required");
+                    return;
+                }
+
+                const roomId = payload.roomId;
+                const anonymousId = payload.anonymousId;
+                const nickname = payload.nickname;
+
+                if (typeof roomId !== "number") {
+                    sendValidationError(socket, "roomId must be a number");
+                    return;
+                }
+
+                if (typeof anonymousId !== "string" || typeof nickname !== "string") {
+                    sendValidationError(socket, "anonymousId and nickname are required");
+                    return;
+                }
 
                 // Validate roomId
                 const roomValidation = validateRoomId(roomId);
                 if (!roomValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: roomValidation.error! },
-                    });
+                    sendValidationError(socket, roomValidation.error!);
                     return;
                 }
 
                 // Validate anonymousId
                 const anonValidation = validateAnonymousId(anonymousId);
                 if (!anonValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: anonValidation.error! },
-                    });
+                    sendValidationError(socket, anonValidation.error!);
                     return;
                 }
 
                 // Validate nickname
                 const nickValidation = validateNickname(nickname);
                 if (!nickValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: nickValidation.error! },
-                    });
+                    sendValidationError(socket, nickValidation.error!);
                     return;
                 }
 
@@ -265,15 +296,22 @@ wss.on("connection", (socket) => {
 
             // ==================== SEND_MESSAGE HANDLER ====================
             else if (parsedMessage.type === "SEND_MESSAGE") {
-                const { message: messageText } = parsedMessage.payload;
+                if (!payload) {
+                    sendValidationError(socket, "Payload is required");
+                    return;
+                }
+
+                const messageText = payload.message;
+
+                if (typeof messageText !== "string") {
+                    sendValidationError(socket, "message is required");
+                    return;
+                }
 
                 // Validate message
                 const msgValidation = validateMessage(messageText);
                 if (!msgValidation.valid) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: msgValidation.error! },
-                    });
+                    sendValidationError(socket, msgValidation.error!);
                     return;
                 }
 
@@ -324,13 +362,15 @@ wss.on("connection", (socket) => {
 
             // ==================== LEAVE_ROOM HANDLER ====================
             else if (parsedMessage.type === "LEAVE_ROOM") {
+                if (payload && typeof payload.roomId !== "undefined" && typeof payload.roomId !== "number") {
+                    sendValidationError(socket, "roomId must be a number");
+                    return;
+                }
+
                 const result = removeUserFromRoom(socketId);
 
                 if (!result) {
-                    sendMessage(socket, {
-                        type: "ERROR",
-                        payload: { error: "You are not in any room" },
-                    });
+                    sendValidationError(socket, "You are not in any room");
                     return;
                 }
 
