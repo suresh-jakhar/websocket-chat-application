@@ -109,6 +109,36 @@ function validateMessage(message: string): { valid: boolean; error?: string } {
     return { valid: true };
 }
 
+function removeUserFromRoom(socketId: string): { roomId: number; userCount: number; user: User } | null {
+    const roomId = userToRoom.get(socketId);
+    if (!roomId) return null;
+
+    const room = rooms.get(roomId);
+    if (!room) return null;
+
+    let userToRemove: User | undefined;
+    room.forEach((user) => {
+        if (user.socketId === socketId) {
+            userToRemove = user;
+        }
+    });
+
+    if (!userToRemove) return null;
+
+    room.delete(userToRemove);
+    userToRoom.delete(socketId);
+
+    const userCount = room.size;
+
+    // Delete room if empty
+    if (userCount === 0) {
+        rooms.delete(roomId);
+        console.log(`[ROOM_CLEANUP] Room ${roomId} deleted (empty)`);
+    }
+
+    return { roomId, userCount, user: userToRemove };
+}
+
 // ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
@@ -292,6 +322,42 @@ wss.on("connection", (socket) => {
                 });
             }
 
+            // ==================== LEAVE_ROOM HANDLER ====================
+            else if (parsedMessage.type === "LEAVE_ROOM") {
+                const result = removeUserFromRoom(socketId);
+
+                if (!result) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: "You are not in any room" },
+                    });
+                    return;
+                }
+
+                const { roomId, userCount, user } = result;
+
+                console.log(
+                    `[LEAVE_ROOM] User ${user.nickname} (${user.anonymousId}) left Room ${roomId}. Remaining users: ${userCount}`
+                );
+
+                // Broadcast USER_LEFT to remaining users
+                if (userCount > 0) {
+                    broadcastToRoom(roomId, {
+                        type: "USER_LEFT",
+                        payload: {
+                            anonymousId: user.anonymousId,
+                            nickname: user.nickname,
+                            userCount,
+                        },
+                    });
+                }
+
+                sendMessage(socket, {
+                    type: "SUCCESS",
+                    payload: { message: "Left room" },
+                });
+            }
+
             // Placeholder for other handlers
             else {
                 sendMessage(socket, {
@@ -310,8 +376,24 @@ wss.on("connection", (socket) => {
 
     socket.on("close", () => {
         console.log(`[Disconnect] ${socketId} disconnected`);
-        userToRoom.delete(socketId);
-        // Cleanup will be implemented in Plan 5
+        
+        const result = removeUserFromRoom(socketId);
+        
+        if (result) {
+            const { roomId, userCount, user } = result;
+            
+            // Broadcast USER_LEFT to remaining users if room still has people
+            if (userCount > 0) {
+                broadcastToRoom(roomId, {
+                    type: "USER_LEFT",
+                    payload: {
+                        anonymousId: user.anonymousId,
+                        nickname: user.nickname,
+                        userCount,
+                    },
+                });
+            }
+        }
     });
 
     socket.on("error", (error) => {
