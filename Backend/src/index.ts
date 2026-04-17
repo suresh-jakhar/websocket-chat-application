@@ -95,6 +95,20 @@ function validateRoomId(roomId: unknown): { valid: boolean; error?: string } {
     return { valid: true };
 }
 
+function validateMessage(message: string): { valid: boolean; error?: string } {
+    if (!message || typeof message !== "string") {
+        return { valid: false, error: "Message is required" };
+    }
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+        return { valid: false, error: "Message cannot be empty" };
+    }
+    if (trimmed.length > 500) {
+        return { valid: false, error: "Message must be 500 characters or less" };
+    }
+    return { valid: true };
+}
+
 // ==================== WEBSOCKET HANDLERS ====================
 
 wss.on("connection", (socket) => {
@@ -217,6 +231,65 @@ wss.on("connection", (socket) => {
                     },
                     socket
                 );
+            }
+
+            // ==================== SEND_MESSAGE HANDLER ====================
+            else if (parsedMessage.type === "SEND_MESSAGE") {
+                const { message: messageText } = parsedMessage.payload;
+
+                // Validate message
+                const msgValidation = validateMessage(messageText);
+                if (!msgValidation.valid) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: msgValidation.error! },
+                    });
+                    return;
+                }
+
+                // Find user's room
+                const userRoomId = userToRoom.get(socketId);
+                if (!userRoomId) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: "You must join a room before sending messages" },
+                    });
+                    return;
+                }
+
+                // Find sender user object to get anonymousId and nickname
+                const room = rooms.get(userRoomId)!;
+                let senderUser: User | undefined;
+                room.forEach((user) => {
+                    if (user.socket === socket) {
+                        senderUser = user;
+                    }
+                });
+
+                if (!senderUser) {
+                    sendMessage(socket, {
+                        type: "ERROR",
+                        payload: { error: "User not found in room" },
+                    });
+                    return;
+                }
+
+                const timestamp = new Date().toISOString();
+
+                console.log(
+                    `[SEND_MESSAGE] ${senderUser.nickname} (${senderUser.anonymousId}) in Room ${userRoomId}: ${messageText.trim()}`
+                );
+
+                // Broadcast message to all users in room
+                broadcastToRoom(userRoomId, {
+                    type: "MESSAGE",
+                    payload: {
+                        anonymousId: senderUser.anonymousId,
+                        nickname: senderUser.nickname,
+                        message: messageText.trim(),
+                        timestamp,
+                    },
+                });
             }
 
             // Placeholder for other handlers
