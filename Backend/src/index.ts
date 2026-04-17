@@ -358,6 +358,25 @@ wss.on("connection", (socket) => {
                 });
             }
 
+            // ==================== GET_ROOMS HANDLER ====================
+            else if (parsedMessage.type === "GET_ROOMS") {
+                const roomsList: Array<{ roomId: number; userCount: number }> = [];
+
+                rooms.forEach((room, roomId) => {
+                    roomsList.push({
+                        roomId,
+                        userCount: room.size,
+                    });
+                });
+
+                console.log(`[GET_ROOMS] Returning ${roomsList.length} active rooms`);
+
+                sendMessage(socket, {
+                    type: "ROOM_LIST",
+                    payload: { rooms: roomsList },
+                });
+            }
+
             // Placeholder for other handlers
             else {
                 sendMessage(socket, {
