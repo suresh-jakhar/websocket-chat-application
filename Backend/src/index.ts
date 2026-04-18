@@ -1,6 +1,12 @@
+import { config } from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 
-const wss = new WebSocketServer({ port: 8080 });
+config();
+
+const PORT = parseInt(process.env.PORT ?? "8080", 10);
+const HOST = process.env.HOST ?? "0.0.0.0";
+
+const wss = new WebSocketServer({ port: PORT, host: HOST });
 
 let roomCounter = 0;
 
@@ -419,4 +425,12 @@ process.on("unhandledRejection", (reason) => {
     console.error(`[Fatal] unhandledRejection: ${formatUnknownError(reason)}`);
 });
 
-console.log("WebSocket server started on port 8080");
+console.log(`
+╔════════════════════════════════════════╗
+║  WebSocket Chat Server Started        ║
+╠════════════════════════════════════════╣
+║  Host: ${HOST.padEnd(30)} ║
+║  Port: ${String(PORT).padEnd(30)} ║
+║  Environment: ${(process.env.NODE_ENV || "development").padEnd(23)} ║
+╚════════════════════════════════════════╝
+`);

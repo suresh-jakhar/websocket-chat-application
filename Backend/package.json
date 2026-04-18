@@ -4,9 +4,10 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-  "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "ws": "^8.20.0"
   },
   "devDependencies": {
