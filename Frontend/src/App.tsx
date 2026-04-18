@@ -19,6 +19,7 @@ export default function App() {
 	const socketRef = useRef<WebSocket | null>(null);
 	const roomsPollRef = useRef<number | null>(null);
 	const nicknameInputRef = useRef<HTMLInputElement | null>(null);
+	const nicknameRef = useRef("");
 	const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
 	const [nicknameInput, setNicknameInput] = useState("");
 	const [nickname, setNickname] = useState("");
@@ -94,12 +95,17 @@ export default function App() {
 			if (parsed.type === "ROOM_CREATED") {
 				const roomId = payload.roomId as number | undefined;
 				if (typeof roomId === "number") {
+					const currentNickname = nicknameRef.current.trim();
+					if (!currentNickname) {
+						setErrorText("Enter your name first.");
+						return;
+					}
 					sendSocketMessage({
 						type: "JOIN_ROOM",
 						payload: {
 							roomId,
 							anonymousId,
-							nickname,
+							nickname: currentNickname,
 						},
 					});
 				}
@@ -228,6 +234,10 @@ export default function App() {
 			window.clearTimeout(timeout);
 		};
 	}, [errorText]);
+
+	useEffect(() => {
+		nicknameRef.current = nickname;
+	}, [nickname]);
 
 	const saveNickname = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
