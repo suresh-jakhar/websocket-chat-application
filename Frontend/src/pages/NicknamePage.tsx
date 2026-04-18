@@ -24,7 +24,7 @@ export function NicknamePage({ nicknameInput, onNicknameInputChange, onSaveNickn
                     maxLength={30}
                 />
                 <ActionButton type="submit" tone="cyan">
-                    Start Chatting
+                    Join
                 </ActionButton>
             </form>
         </section>

@@ -12,25 +12,31 @@ type HomePageProps = {
 
 export function HomePage({ nickname, rooms, onCreateRoom, onRequestRooms, onJoinRoom }: HomePageProps) {
     return (
-        <section className="layout-grid">
-            <article className="panel hero-panel">
-                <h1>Welcome, {nickname}</h1>
-                <p>Create a room or join one that is already active.</p>
-                <ActionButton onClick={onCreateRoom} tone="cyan">
-                    Create Room
-                </ActionButton>
-            </article>
+        <section className="home-stage">
+            <div className="home-backdrop" aria-hidden="true">
+                WELCOME, {nickname}
+            </div>
 
-            <article className="panel room-list-panel">
-                <div className="panel-top">
-                    <h2>Active Rooms</h2>
-                    <ActionButton onClick={onRequestRooms} tone="pink">
-                        Refresh
+            <div className="home-stack">
+                <article className="panel home-card create-room-card">
+                    <h1>Create Room</h1>
+                    <p>Start a new room and share the room ID with others.</p>
+                    <ActionButton onClick={onCreateRoom} tone="cyan">
+                        Create Room
                     </ActionButton>
-                </div>
+                </article>
 
-                <RoomList rooms={rooms} onJoinRoom={onJoinRoom} />
-            </article>
+                <article className="panel home-card join-room-card">
+                    <div className="panel-top">
+                        <h2>Join Room</h2>
+                        <ActionButton onClick={onRequestRooms} tone="pink">
+                            Refresh
+                        </ActionButton>
+                    </div>
+
+                    <RoomList rooms={rooms} onJoinRoom={onJoinRoom} />
+                </article>
+            </div>
         </section>
     );
 }

@@ -109,6 +109,68 @@
 	gap: 1rem;
 }
 
+.home-stage {
+	position: relative;
+	height: calc(100dvh - 6.5rem);
+	min-height: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
+.home-backdrop {
+	position: absolute;
+	left: 50%;
+	top: 1rem;
+	transform: translateX(-50%);
+	z-index: 0;
+	pointer-events: none;
+	user-select: none;
+	font-size: clamp(1.7rem, 4.2vw, 3.6rem);
+	line-height: 0.9;
+	font-weight: 900;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: rgba(23, 20, 29, 0.12);
+	width: min(100%, 1180px);
+	text-align: center;
+}
+
+.home-stack {
+	position: relative;
+	z-index: 1;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	gap: 1rem;
+	height: 100%;
+	padding-top: clamp(4.25rem, 9vh, 6rem);
+	width: min(100%, 1240px);
+	margin: 0 auto;
+}
+
+.home-card {
+	width: 100%;
+	max-width: none;
+}
+
+.create-room-card {
+	align-self: stretch;
+}
+
+.join-room-card {
+	align-self: stretch;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.join-room-card .room-list {
+	flex: 1;
+	min-height: 0;
+	max-height: none;
+	overflow: auto;
+}
+
 .landing-stage {
 	position: relative;
 	flex: 1;
@@ -182,7 +244,7 @@
 	bottom: -0.8vh;
 	z-index: 2;
 	display: block;
-	height: 86%;
+	height: 90%;
 	width: auto;
 	max-height: calc(100% + 1rem);
 	max-width: min(88vw, 980px);
@@ -355,7 +417,6 @@ input:focus {
 }
 
 @media (max-width: 980px) {
-	.layout-grid,
 	.chat-layout {
 		grid-template-columns: 1fr;
 		grid-template-areas:
@@ -367,6 +428,33 @@ input:focus {
 	.chat-header {
 		align-items: flex-start;
 		flex-direction: column;
+	}
+
+	.home-stage {
+		height: calc(100dvh - 6.5rem);
+		min-height: 0;
+	}
+
+	.home-stack {
+		width: 100%;
+	}
+
+	.home-card {
+		width: 100%;
+	}
+
+	.home-backdrop {
+		left: 0.75rem;
+		top: 0.15rem;
+		font-size: clamp(1.7rem, 10vw, 3.1rem);
+	}
+
+	.home-stack {
+		padding-top: 1.25rem;
+	}
+
+	.home-card {
+		max-width: none;
 	}
 
 	.nickname-form,
