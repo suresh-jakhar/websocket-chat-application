@@ -4,45 +4,20 @@ import "./App.css";
 import incomingSound from "./audio/incoming_text_sound.wav";
 import joinLeaveSound from "./audio/join-leave-room-sound.wav";
 import outgoingSound from "./audio/outgoing_text_sound.wav";
-
-type RoomSummary = {
-	roomId: number;
-	userCount: number;
-};
-
-type MessagePayload = {
-	anonymousId: string;
-	nickname: string;
-	message: string;
-	timestamp: string;
-};
-
-type IncomingServerMessage = {
-	type: string;
-	payload?: Record<string, unknown>;
-};
+import { BackgroundShapes } from "./components/BackgroundShapes";
+import { StatusStrip } from "./components/StatusStrip";
+import { ChatPage } from "./pages/ChatPage";
+import { HomePage } from "./pages/HomePage";
+import { NicknamePage } from "./pages/NicknamePage";
+import type { IncomingServerMessage, MessagePayload, RoomSummary, ConnectionStatus } from "./types/chat";
+import { generateAnonymousId } from "./utils/chat";
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
-
-function generateAnonymousId() {
-	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-		return `anon_${crypto.randomUUID().slice(0, 8)}`;
-	}
-	return `anon_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function formatTime(timestamp: string) {
-	const date = new Date(timestamp);
-	if (Number.isNaN(date.getTime())) {
-		return "--:--";
-	}
-	return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export default function App() {
 	const socketRef = useRef<WebSocket | null>(null);
 	const roomsPollRef = useRef<number | null>(null);
-	const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+	const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
 	const [nicknameInput, setNicknameInput] = useState("");
 	const [nickname, setNickname] = useState("");
 	const [rooms, setRooms] = useState<RoomSummary[]>([]);
@@ -310,123 +285,36 @@ export default function App() {
 
 	return (
 		<main className="app-root">
-			<div className="bg-shape shape-1" />
-			<div className="bg-shape shape-2" />
-			<div className="bg-shape shape-3" />
-
-			<section className="status-strip">
-				<strong>Server:</strong>
-				<span className={`status-pill ${connectionStatus}`}>{connectionStatus}</span>
-				<span className="env-pill">{WS_URL}</span>
-				<span className="env-pill">ID: {anonymousId}</span>
-			</section>
+			<BackgroundShapes />
+			<StatusStrip status={connectionStatus} wsUrl={WS_URL} anonymousId={anonymousId} />
 
 			{!nickname ? (
-				<section className="panel hero-panel">
-					<h1>Neo Brutal Rooms</h1>
-					<p>
-						Loud colors, thick borders, live chat. Pick a mandatory nickname and jump into numeric rooms instantly.
-					</p>
-
-					<form onSubmit={saveNickname} className="nickname-form">
-						<input
-							value={nicknameInput}
-							onChange={(event) => setNicknameInput(event.target.value)}
-							placeholder="mandatory nickname"
-							maxLength={30}
-						/>
-						<button type="submit">Start Chatting</button>
-					</form>
-				</section>
+				<NicknamePage
+					nicknameInput={nicknameInput}
+					onNicknameInputChange={setNicknameInput}
+					onSaveNickname={saveNickname}
+				/>
 			) : currentRoomId === null ? (
-				<section className="layout-grid">
-					<article className="panel hero-panel">
-						<h1>Welcome, {nickname}</h1>
-						<p>Create a room or join any active room below. Room IDs are numeric and fully ephemeral.</p>
-						<button onClick={createRoom} className="action-btn action-cyan">Create Room</button>
-					</article>
-
-					<article className="panel room-list-panel">
-						<div className="panel-top">
-							<h2>Active Rooms</h2>
-							<button onClick={requestRooms} className="action-btn action-pink">Refresh</button>
-						</div>
-
-						<div className="room-list">
-							{rooms.length === 0 ? (
-								<p className="muted">No active rooms yet. Create one and share the ID.</p>
-							) : (
-								rooms.map((room) => (
-									<div key={room.roomId} className="room-card">
-										<div>
-											<h3>Room {room.roomId}</h3>
-											<p>{room.userCount} users online</p>
-										</div>
-										<button onClick={() => joinRoom(room.roomId)} className="action-btn action-lime">Join</button>
-									</div>
-								))
-							)}
-						</div>
-					</article>
-				</section>
+				<HomePage
+					nickname={nickname}
+					rooms={rooms}
+					onCreateRoom={createRoom}
+					onRequestRooms={requestRooms}
+					onJoinRoom={joinRoom}
+				/>
 			) : (
-				<section className="chat-layout">
-					<header className="panel chat-header">
-						<div>
-							<h1>You are in Room {currentRoomId}</h1>
-							<p>{roomUserCount} users in this room</p>
-						</div>
-						<div className="header-actions">
-							<button onClick={requestRooms} className="action-btn action-pink">Sync Rooms</button>
-							<button onClick={leaveRoom} className="action-btn action-orange">Leave Room</button>
-						</div>
-					</header>
-
-					<section className="panel feed-panel">
-						<h2>Activity</h2>
-						<div className="system-feed">
-							{systemFeed.length === 0 ? (
-								<p className="muted">Room activity will appear here.</p>
-							) : (
-								systemFeed.map((item, index) => (
-									<p key={`${item}-${index}`}>{item}</p>
-								))
-							)}
-						</div>
-					</section>
-
-					<section className="panel messages-panel">
-						<h2>Chat</h2>
-						<div className="messages-list">
-							{messages.length === 0 ? (
-								<p className="muted">No messages yet. Break the silence.</p>
-							) : (
-								messages.map((message, index) => {
-									const outgoing = message.anonymousId === anonymousId;
-									return (
-										<article key={`${message.timestamp}-${index}`} className={`message-item ${outgoing ? "outgoing" : "incoming"}`}>
-											<div className="message-head">
-												<strong>{outgoing ? "You" : message.nickname}</strong>
-												<span>{formatTime(message.timestamp)}</span>
-											</div>
-											<p>{message.message}</p>
-										</article>
-									);
-								})
-							)}
-						</div>
-
-						<form className="composer" onSubmit={sendMessageToRoom}>
-							<input
-								value={messageInput}
-								onChange={(event) => setMessageInput(event.target.value)}
-								placeholder="Type your message..."
-								maxLength={500}
-							/>
-							<button type="submit" className="action-btn action-cyan">Send</button>
-						</form>
-					</section>
-				</section>
+				<ChatPage
+					currentRoomId={currentRoomId}
+					roomUserCount={roomUserCount}
+					messages={messages}
+					systemFeed={systemFeed}
+					anonymousId={anonymousId}
+					messageInput={messageInput}
+					onMessageInputChange={setMessageInput}
+					onSendMessage={sendMessageToRoom}
+					onRequestRooms={requestRooms}
+					onLeaveRoom={leaveRoom}
+				/>
 			)}
 
 			{errorText ? <aside className="error-toast">{errorText}</aside> : null}
