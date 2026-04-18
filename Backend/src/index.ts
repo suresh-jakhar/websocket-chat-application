@@ -159,16 +159,48 @@ function parseAllowedOrigins(value: string): string[] | "*" {
     return entries.length === 0 ? "*" : entries;
 }
 
+function matchesOriginRule(origin: string, rule: string): boolean {
+    if (rule === origin) {
+        return true;
+    }
+
+    if (rule.startsWith("*.")) {
+        const suffix = rule.slice(1);
+        return origin.endsWith(suffix);
+    }
+
+    return false;
+}
+
+function isAllowedOrigin(origin: string | undefined, allowedOrigins: string[] | "*"): boolean {
+    if (!origin) {
+        return true;
+    }
+
+    if (allowedOrigins === "*") {
+        return true;
+    }
+
+    return allowedOrigins.some((rule) => matchesOriginRule(origin, rule));
+}
+
 const app = express();
 const allowedOrigins = parseAllowedOrigins(FRONTEND_ORIGIN);
+const corsOptions: cors.CorsOptions = {
+    origin: (origin, callback) => {
+        if (isAllowedOrigin(origin, allowedOrigins)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`CORS blocked for origin: ${origin ?? "unknown"}`));
+    },
+    credentials: false,
+};
 
 app.use(express.json({ limit: "512kb" }));
-app.use(
-    cors({
-        origin: allowedOrigins === "*" ? true : allowedOrigins,
-        credentials: false,
-    })
-);
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.get("/health", (_, res) => {
     res.json({
@@ -180,6 +212,10 @@ app.get("/health", (_, res) => {
             connected: providerConnected,
             clusterId: PIEHOST_CLUSTER_ID || null,
             registryRoom: PIEHOST_REGISTRY_ROOM,
+        },
+        cors: {
+            frontendOriginConfig: FRONTEND_ORIGIN,
+            allowedOrigins,
         },
     });
 });
@@ -318,12 +354,12 @@ if (isProviderConfigured()) {
 app.listen(PORT, HOST, () => {
     console.log(`
 +----------------------------------------+
-¦  Chat Backend API Started             ¦
-¦----------------------------------------¦
-¦  Host: ${HOST.padEnd(30)} ¦
-¦  Port: ${String(PORT).padEnd(30)} ¦
-¦  Environment: ${NODE_ENV.padEnd(23)} ¦
-¦  Provider configured: ${String(isProviderConfigured()).padEnd(13)} ¦
+ï¿½  Chat Backend API Started             ï¿½
+ï¿½----------------------------------------ï¿½
+ï¿½  Host: ${HOST.padEnd(30)} ï¿½
+ï¿½  Port: ${String(PORT).padEnd(30)} ï¿½
+ï¿½  Environment: ${NODE_ENV.padEnd(23)} ï¿½
+ï¿½  Provider configured: ${String(isProviderConfigured()).padEnd(13)} ï¿½
 +----------------------------------------+
 `);
 });
