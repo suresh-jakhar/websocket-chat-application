@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { formatTime } from "../utils/chat";
 import type { MessagePayload } from "../types/chat";
 
@@ -7,6 +8,12 @@ type MessageListProps = {
 };
 
 export function MessageList({ messages, anonymousId }: MessageListProps) {
+    const bottomRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }, [messages]);
+
     return (
         <div className="messages-list">
             {messages.length === 0 ? (
@@ -25,6 +32,7 @@ export function MessageList({ messages, anonymousId }: MessageListProps) {
                     );
                 })
             )}
+            <div ref={bottomRef} />
         </div>
     );
 }
