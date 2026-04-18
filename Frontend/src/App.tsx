@@ -17,6 +17,7 @@ const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
 export default function App() {
 	const socketRef = useRef<WebSocket | null>(null);
 	const roomsPollRef = useRef<number | null>(null);
+	const nicknameInputRef = useRef<HTMLInputElement | null>(null);
 	const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
 	const [nicknameInput, setNicknameInput] = useState("");
 	const [nickname, setNickname] = useState("");
@@ -213,15 +214,31 @@ export default function App() {
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!errorText) {
+			return;
+		}
+
+		const timeout = window.setTimeout(() => {
+			setErrorText("");
+		}, 2200);
+
+		return () => {
+			window.clearTimeout(timeout);
+		};
+	}, [errorText]);
+
 	const saveNickname = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		const trimmed = nicknameInput.trim();
 		if (!trimmed) {
-			setErrorText("Nickname is mandatory.");
+			setErrorText("Enter your name.");
+			nicknameInputRef.current?.focus();
 			return;
 		}
 		if (trimmed.length > 30) {
-			setErrorText("Nickname must be 30 characters or less.");
+			setErrorText("Name must be 30 characters or less.");
+			nicknameInputRef.current?.focus();
 			return;
 		}
 		setNickname(trimmed);
@@ -231,7 +248,7 @@ export default function App() {
 
 	const createRoom = () => {
 		if (!nickname) {
-			setErrorText("Set your nickname first.");
+			setErrorText("Enter your name first.");
 			return;
 		}
 		sendSocketMessage({
@@ -245,7 +262,7 @@ export default function App() {
 
 	const joinRoom = (roomId: number) => {
 		if (!nickname) {
-			setErrorText("Set your nickname first.");
+			setErrorText("Enter your name first.");
 			return;
 		}
 		sendSocketMessage({
@@ -286,13 +303,14 @@ export default function App() {
 	return (
 		<main className="app-root">
 			<BackgroundShapes />
-			<StatusStrip status={connectionStatus} wsUrl={WS_URL} anonymousId={anonymousId} />
+			<StatusStrip status={connectionStatus} anonymousId={anonymousId} />
 
 			{!nickname ? (
 				<NicknamePage
 					nicknameInput={nicknameInput}
 					onNicknameInputChange={setNicknameInput}
 					onSaveNickname={saveNickname}
+					nicknameInputRef={nicknameInputRef}
 				/>
 			) : currentRoomId === null ? (
 				<HomePage

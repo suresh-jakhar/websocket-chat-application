@@ -15,7 +15,7 @@ export function HomePage({ nickname, rooms, onCreateRoom, onRequestRooms, onJoin
         <section className="layout-grid">
             <article className="panel hero-panel">
                 <h1>Welcome, {nickname}</h1>
-                <p>Create a room or join any active room below. Room IDs are numeric and fully ephemeral.</p>
+                <p>Create a room or join one that is already active.</p>
                 <ActionButton onClick={onCreateRoom} tone="cyan">
                     Create Room
                 </ActionButton>

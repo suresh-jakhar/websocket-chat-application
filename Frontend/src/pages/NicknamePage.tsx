@@ -6,21 +6,21 @@ type NicknamePageProps = {
     nicknameInput: string;
     onNicknameInputChange: (value: string) => void;
     onSaveNickname: (event: FormEvent<HTMLFormElement>) => void;
+    nicknameInputRef: React.RefObject<HTMLInputElement | null>;
 };
 
-export function NicknamePage({ nicknameInput, onNicknameInputChange, onSaveNickname }: NicknamePageProps) {
+export function NicknamePage({ nicknameInput, onNicknameInputChange, onSaveNickname, nicknameInputRef }: NicknamePageProps) {
     return (
         <section className="panel hero-panel">
-            <h1>Neo Brutal Rooms</h1>
-            <p>
-                Loud colors, thick borders, live chat. Pick a mandatory nickname and jump into numeric rooms instantly.
-            </p>
+            <h1>Room Chat</h1>
+            <p>Enter your name to start chatting and join numbered rooms.</p>
 
             <form onSubmit={onSaveNickname} className="nickname-form">
                 <AppInput
+                    inputRef={nicknameInputRef}
                     value={nicknameInput}
                     onChange={onNicknameInputChange}
-                    placeholder="mandatory nickname"
+                    placeholder="name"
                     maxLength={30}
                 />
                 <ActionButton type="submit" tone="cyan">
