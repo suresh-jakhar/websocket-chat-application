@@ -1,8 +1,10 @@
 import type { FormEvent } from "react";
 import { ActionButton } from "../components/ActionButton";
 import { AppInput } from "../components/AppInput";
+import { ExitIcon } from "../icons/exit";
 import { SoundOffIcon } from "../icons/sound_off";
 import { SoundOnIcon } from "../icons/sound_on";
+import { SyncIcon } from "../icons/sync";
 import { MessageList } from "../components/MessageList";
 import { SystemFeed } from "../components/SystemFeed";
 import type { MessagePayload } from "../types/chat";
@@ -38,36 +40,44 @@ export function ChatPage({
 }: ChatPageProps) {
     return (
         <section className="chat-layout">
-            <header className="panel chat-header">
-                <div>
-                    <h1>You are in Room {currentRoomId}</h1>
-                    <p>{roomUserCount} users in this room</p>
+            <section className="panel feed-panel activity-panel">
+                <div className="panel-top activity-panel-top">
+                    <h2>Activity</h2>
                 </div>
-                <div className="header-actions">
-                    <ActionButton onClick={onToggleMute} tone="lime">
-                        <span className="mute-btn-content">
-                            <span className="mute-btn-icon" aria-hidden="true">
-                                {isMuted ? <SoundOffIcon /> : <SoundOnIcon />}
-                            </span>
-                            <span>{isMuted ? "Unmute" : "Mute"}</span>
-                        </span>
-                    </ActionButton>
-                    <ActionButton onClick={onRequestRooms} tone="pink">
-                        Sync Rooms
-                    </ActionButton>
-                    <ActionButton onClick={onLeaveRoom} tone="orange">
-                        Leave Room
-                    </ActionButton>
-                </div>
-            </header>
-
-            <section className="panel feed-panel">
-                <h2>Activity</h2>
                 <SystemFeed items={systemFeed} />
             </section>
 
             <section className="panel messages-panel">
-                <h2>Chat</h2>
+                <div className="panel-top chat-panel-top">
+                    <h2 className="chat-room-title">Room {currentRoomId}</h2>
+                    <div className="header-actions">
+                        <span className="chat-room-count">{roomUserCount} Online</span>
+                        <ActionButton onClick={onToggleMute} tone="lime">
+                            <span className="mute-btn-content">
+                                <span className="mute-btn-icon" aria-hidden="true">
+                                    {isMuted ? <SoundOffIcon /> : <SoundOnIcon />}
+                                </span>
+                                <span>{isMuted ? "Unmute" : "Mute"}</span>
+                            </span>
+                        </ActionButton>
+                        <ActionButton onClick={onRequestRooms} tone="pink">
+                            <span className="action-btn-with-icon">
+                                <span className="action-btn-icon" aria-hidden="true">
+                                    <SyncIcon />
+                                </span>
+                                <span>Sync</span>
+                            </span>
+                        </ActionButton>
+                        <ActionButton onClick={onLeaveRoom} tone="orange">
+                            <span className="action-btn-with-icon">
+                                <span className="action-btn-icon" aria-hidden="true">
+                                    <ExitIcon />
+                                </span>
+                                <span>Leave</span>
+                            </span>
+                        </ActionButton>
+                    </div>
+                </div>
                 <MessageList messages={messages} anonymousId={anonymousId} />
 
                 <form className="composer" onSubmit={onSendMessage}>
