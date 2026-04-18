@@ -10,9 +10,4 @@ export type MessagePayload = {
     timestamp: string;
 };
 
-export type IncomingServerMessage = {
-    type: string;
-    payload?: Record<string, unknown>;
-};
-
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";

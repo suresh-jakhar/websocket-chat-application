@@ -1,436 +1,329 @@
+import cors from "cors";
 import { config } from "dotenv";
-import { WebSocketServer, WebSocket } from "ws";
+import express from "express";
+import { URLSearchParams } from "url";
+import { WebSocket } from "ws";
 
 config();
 
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
+const NODE_ENV = process.env.NODE_ENV ?? "development";
+const PIEHOST_CLUSTER_ID = process.env.PIEHOST_CLUSTER_ID ?? "";
+const PIEHOST_API_KEY = process.env.PIEHOST_API_KEY ?? "";
+const PIEHOST_REGISTRY_ROOM = process.env.PIEHOST_REGISTRY_ROOM ?? "rooms_registry";
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "*";
+const PROVIDER_USER_ID = "backend-service";
 
-const wss = new WebSocketServer({ port: PORT, host: HOST });
-
-let roomCounter = 0;
-
-type User = {
-    socket: WebSocket;
-    anonymousId: string;
-    nickname: string;
-    socketId: string;
+type RoomState = {
+    roomId: number;
+    userCount: number;
+    createdAt: string;
 };
 
-const rooms = new Map<number, Set<User>>();
-const userToRoom = new Map<string, number>();
+type ProviderEvent = {
+    event: string;
+    data: Record<string, unknown>;
+    meta?: string;
+};
 
-type IncomingMessage =
-    | { type: "CREATE_ROOM"; payload: { anonymousId: string; nickname: string } }
-    | { type: "JOIN_ROOM"; payload: { roomId: number; anonymousId: string; nickname: string } }
-    | { type: "LEAVE_ROOM"; payload: { roomId: number } }
-    | { type: "SEND_MESSAGE"; payload: { message: string } }
-    | { type: "GET_ROOMS"; payload?: object };
+const rooms = new Map<number, RoomState>();
+let roomCounter = 0;
+let providerConnected = false;
+let registrySocket: WebSocket | null = null;
 
-type OutgoingMessage =
-    | { type: "ERROR"; payload: { error: string } }
-    | { type: "SUCCESS"; payload: { message: string; [key: string]: unknown } }
-    | { type: "ROOM_CREATED"; payload: { roomId: number } }
-    | { type: "ROOM_JOINED"; payload: { roomId: number; userCount: number } }
-    | { type: "USER_JOINED"; payload: { anonymousId: string; nickname: string; userCount: number } }
-    | { type: "USER_LEFT"; payload: { anonymousId: string; nickname: string; userCount: number } }
-    | { type: "MESSAGE"; payload: { anonymousId: string; nickname: string; message: string; timestamp: string } }
-    | { type: "ROOM_LIST"; payload: { rooms: Array<{ roomId: number; userCount: number }> } };
-
-function generateSocketId(): string {
-    return `socket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+function isProviderConfigured(): boolean {
+    return PIEHOST_CLUSTER_ID.trim().length > 0 && PIEHOST_API_KEY.trim().length > 0;
 }
 
-function sendMessage(socket: WebSocket, message: OutgoingMessage) {
-    if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(message));
-    }
-}
-
-function broadcastToRoom(roomId: number, message: OutgoingMessage, excludeSocket?: WebSocket) {
-    const room = rooms.get(roomId);
-    if (!room) return;
-
-    room.forEach((user) => {
-        if (excludeSocket && user.socket === excludeSocket) return;
-        sendMessage(user.socket, message);
+function buildProviderUrl(roomName: string, userId?: string): string {
+    const params = new URLSearchParams({
+        api_key: PIEHOST_API_KEY,
+        notify_self: "1",
+        presence: "1",
     });
+
+    if (userId) {
+        params.set("user", userId);
+    }
+
+    return `wss://${PIEHOST_CLUSTER_ID}.piesocket.com/v3/${encodeURIComponent(roomName)}?${params.toString()}`;
 }
 
-function validateNickname(nickname: string): { valid: boolean; error?: string } {
-    if (!nickname || typeof nickname !== "string") {
-        return { valid: false, error: "Nickname is required" };
-    }
-    const trimmed = nickname.trim();
-    if (trimmed.length === 0) {
-        return { valid: false, error: "Nickname cannot be empty" };
-    }
-    if (trimmed.length > 30) {
-        return { valid: false, error: "Nickname must be 30 characters or less" };
-    }
-    return { valid: true };
+function listRooms(): RoomState[] {
+    return [...rooms.values()].sort((a, b) => a.roomId - b.roomId);
 }
 
-function validateAnonymousId(anonymousId: string): { valid: boolean; error?: string } {
-    if (!anonymousId || typeof anonymousId !== "string") {
-        return { valid: false, error: "anonymousId is required" };
-    }
-    if (anonymousId.trim().length === 0) {
-        return { valid: false, error: "anonymousId cannot be empty" };
-    }
-    return { valid: true };
-}
-
-function validateRoomId(roomId: unknown): { valid: boolean; error?: string } {
-    if (typeof roomId !== "number") {
-        return { valid: false, error: "roomId must be a number" };
-    }
-    if (!rooms.has(roomId)) {
-        return { valid: false, error: `Room ${roomId} does not exist` };
-    }
-    return { valid: true };
-}
-
-function validateMessage(message: string): { valid: boolean; error?: string } {
-    if (!message || typeof message !== "string") {
-        return { valid: false, error: "Message is required" };
-    }
-    const trimmed = message.trim();
-    if (trimmed.length === 0) {
-        return { valid: false, error: "Message cannot be empty" };
-    }
-    if (trimmed.length > 500) {
-        return { valid: false, error: "Message must be 500 characters or less" };
-    }
-    return { valid: true };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function sendValidationError(socket: WebSocket, error: string) {
-    sendMessage(socket, {
-        type: "ERROR",
-        payload: { error },
-    });
-}
-
-function formatUnknownError(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return String(error);
-}
-
-function removeUserFromRoom(socketId: string): { roomId: number; userCount: number; user: User } | null {
-    const roomId = userToRoom.get(socketId);
-    if (!roomId) return null;
-
-    const room = rooms.get(roomId);
-    if (!room) return null;
-
-    let userToRemove: User | undefined;
-    room.forEach((user) => {
-        if (user.socketId === socketId) {
-            userToRemove = user;
+function sendOverSocket(socket: WebSocket, event: ProviderEvent): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (socket.readyState !== WebSocket.OPEN) {
+            reject(new Error("Provider socket is not open"));
+            return;
         }
-    });
 
-    if (!userToRemove) return null;
-
-    room.delete(userToRemove);
-    userToRoom.delete(socketId);
-
-    const userCount = room.size;
-
-    if (userCount === 0) {
-        rooms.delete(roomId);
-        console.log(`[ROOM_CLEANUP] Room ${roomId} deleted (empty)`);
-    }
-
-    return { roomId, userCount, user: userToRemove };
-}
-
-wss.on("connection", (socket) => {
-    const socketId = generateSocketId();
-    console.log(`[Connection] ${socketId} connected. Total connections: ${wss.clients.size}`);
-
-    socket.on("message", (data) => {
-        try {
-            const parsedMessage = JSON.parse(data.toString()) as { type?: string; payload?: unknown };
-
-            if (!parsedMessage || typeof parsedMessage.type !== "string") {
-                sendValidationError(socket, "Message type is required");
+        socket.send(JSON.stringify(event), (error?: Error) => {
+            if (error) {
+                reject(error);
                 return;
             }
+            resolve();
+        });
+    });
+}
 
-            const payload = isRecord(parsedMessage.payload) ? parsedMessage.payload : null;
+async function publishToProviderRoom(roomName: string, event: ProviderEvent): Promise<void> {
+    if (!isProviderConfigured()) {
+        throw new Error("Provider is not configured");
+    }
 
-            if (parsedMessage.type === "CREATE_ROOM") {
-                if (!payload) {
-                    sendValidationError(socket, "Payload is required");
-                    return;
-                }
+    const url = buildProviderUrl(roomName, PROVIDER_USER_ID);
 
-                const anonymousId = payload.anonymousId;
-                const nickname = payload.nickname;
+    await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(url);
 
-                if (typeof anonymousId !== "string" || typeof nickname !== "string") {
-                    sendValidationError(socket, "anonymousId and nickname are required");
-                    return;
-                }
-
-                const anonValidation = validateAnonymousId(anonymousId);
-                if (!anonValidation.valid) {
-                    sendValidationError(socket, anonValidation.error!);
-                    return;
-                }
-
-                const nickValidation = validateNickname(nickname);
-                if (!nickValidation.valid) {
-                    sendValidationError(socket, nickValidation.error!);
-                    return;
-                }
-
-                roomCounter++;
-                const newRoomId = roomCounter;
-                rooms.set(newRoomId, new Set<User>());
-
-                console.log(`[CREATE_ROOM] Room ${newRoomId} created by ${nickname} (${anonymousId})`);
-
-                sendMessage(socket, {
-                    type: "ROOM_CREATED",
-                    payload: { roomId: newRoomId },
+        ws.on("open", () => {
+            void sendOverSocket(ws, event)
+                .then(() => {
+                    ws.close();
+                    resolve();
+                })
+                .catch((error) => {
+                    ws.close();
+                    reject(error);
                 });
-            } else if (parsedMessage.type === "JOIN_ROOM") {
-                if (!payload) {
-                    sendValidationError(socket, "Payload is required");
-                    return;
-                }
+        });
 
-                const roomId = payload.roomId;
-                const anonymousId = payload.anonymousId;
-                const nickname = payload.nickname;
+        ws.on("error", (error) => {
+            reject(error);
+        });
+    });
+}
 
-                if (typeof roomId !== "number") {
-                    sendValidationError(socket, "roomId must be a number");
-                    return;
-                }
+function connectRegistrySocket() {
+    if (!isProviderConfigured()) {
+        providerConnected = false;
+        return;
+    }
 
-                if (typeof anonymousId !== "string" || typeof nickname !== "string") {
-                    sendValidationError(socket, "anonymousId and nickname are required");
-                    return;
-                }
+    if (registrySocket && (registrySocket.readyState === WebSocket.OPEN || registrySocket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
 
-                const roomValidation = validateRoomId(roomId);
-                if (!roomValidation.valid) {
-                    sendValidationError(socket, roomValidation.error!);
-                    return;
-                }
+    const url = buildProviderUrl(PIEHOST_REGISTRY_ROOM, PROVIDER_USER_ID);
+    registrySocket = new WebSocket(url);
 
-                const anonValidation = validateAnonymousId(anonymousId);
-                if (!anonValidation.valid) {
-                    sendValidationError(socket, anonValidation.error!);
-                    return;
-                }
+    registrySocket.on("open", () => {
+        providerConnected = true;
+        console.log(`[Provider] Connected to registry room '${PIEHOST_REGISTRY_ROOM}'`);
+    });
 
-                const nickValidation = validateNickname(nickname);
-                if (!nickValidation.valid) {
-                    sendValidationError(socket, nickValidation.error!);
-                    return;
-                }
+    registrySocket.on("close", () => {
+        providerConnected = false;
+        registrySocket = null;
 
-                const room = rooms.get(roomId)!;
-                const user: User = {
-                    socket,
-                    anonymousId,
-                    nickname,
-                    socketId,
-                };
-
-                room.add(user);
-                userToRoom.set(socketId, roomId);
-
-                const userCount = room.size;
-
-                console.log(`[JOIN_ROOM] User ${nickname} (${anonymousId}) joined Room ${roomId}. Total users: ${userCount}`);
-
-                sendMessage(socket, {
-                    type: "ROOM_JOINED",
-                    payload: { roomId, userCount },
-                });
-
-                broadcastToRoom(
-                    roomId,
-                    {
-                        type: "USER_JOINED",
-                        payload: {
-                            anonymousId,
-                            nickname,
-                            userCount,
-                        },
-                    },
-                    socket
-                );
-            } else if (parsedMessage.type === "SEND_MESSAGE") {
-                if (!payload) {
-                    sendValidationError(socket, "Payload is required");
-                    return;
-                }
-
-                const messageText = payload.message;
-
-                if (typeof messageText !== "string") {
-                    sendValidationError(socket, "message is required");
-                    return;
-                }
-
-                const msgValidation = validateMessage(messageText);
-                if (!msgValidation.valid) {
-                    sendValidationError(socket, msgValidation.error!);
-                    return;
-                }
-
-                const userRoomId = userToRoom.get(socketId);
-                if (!userRoomId) {
-                    sendValidationError(socket, "You must join a room before sending messages");
-                    return;
-                }
-
-                const room = rooms.get(userRoomId)!;
-                let senderUser: User | undefined;
-                room.forEach((user) => {
-                    if (user.socket === socket) {
-                        senderUser = user;
-                    }
-                });
-
-                if (!senderUser) {
-                    sendValidationError(socket, "User not found in room");
-                    return;
-                }
-
-                const timestamp = new Date().toISOString();
-
-                console.log(`[SEND_MESSAGE] ${senderUser.nickname} (${senderUser.anonymousId}) in Room ${userRoomId}: ${messageText.trim()}`);
-
-                broadcastToRoom(userRoomId, {
-                    type: "MESSAGE",
-                    payload: {
-                        anonymousId: senderUser.anonymousId,
-                        nickname: senderUser.nickname,
-                        message: messageText.trim(),
-                        timestamp,
-                    },
-                });
-            } else if (parsedMessage.type === "LEAVE_ROOM") {
-                if (payload && typeof payload.roomId !== "undefined" && typeof payload.roomId !== "number") {
-                    sendValidationError(socket, "roomId must be a number");
-                    return;
-                }
-
-                const result = removeUserFromRoom(socketId);
-
-                if (!result) {
-                    sendValidationError(socket, "You are not in any room");
-                    return;
-                }
-
-                const { roomId, userCount, user } = result;
-
-                console.log(`[LEAVE_ROOM] User ${user.nickname} (${user.anonymousId}) left Room ${roomId}. Remaining users: ${userCount}`);
-
-                if (userCount > 0) {
-                    broadcastToRoom(roomId, {
-                        type: "USER_LEFT",
-                        payload: {
-                            anonymousId: user.anonymousId,
-                            nickname: user.nickname,
-                            userCount,
-                        },
-                    });
-                }
-
-                sendMessage(socket, {
-                    type: "SUCCESS",
-                    payload: { message: "Left room" },
-                });
-            } else if (parsedMessage.type === "GET_ROOMS") {
-                const roomsList: Array<{ roomId: number; userCount: number }> = [];
-
-                rooms.forEach((room, roomId) => {
-                    roomsList.push({
-                        roomId,
-                        userCount: room.size,
-                    });
-                });
-
-                console.log(`[GET_ROOMS] Returning ${roomsList.length} active rooms`);
-
-                sendMessage(socket, {
-                    type: "ROOM_LIST",
-                    payload: { rooms: roomsList },
-                });
-            } else {
-                sendMessage(socket, {
-                    type: "ERROR",
-                    payload: { error: `Handler for ${parsedMessage.type} not yet implemented` },
-                });
-            }
-        } catch (error) {
-            console.warn(`[Error] ${socketId} sent invalid JSON: ${formatUnknownError(error)}`);
-            sendMessage(socket, {
-                type: "ERROR",
-                payload: { error: "Invalid JSON format" },
-            });
+        if (NODE_ENV !== "test") {
+            setTimeout(() => connectRegistrySocket(), 1500);
         }
     });
 
-    socket.on("close", () => {
-        console.log(`[Disconnect] ${socketId} disconnected`);
+    registrySocket.on("error", (error) => {
+        providerConnected = false;
+        console.error(`[Provider] Registry socket error: ${error.message}`);
+    });
+}
 
-        const result = removeUserFromRoom(socketId);
+async function publishRegistryEvent(event: ProviderEvent): Promise<void> {
+    if (!isProviderConfigured()) {
+        return;
+    }
 
-        if (result) {
-            const { roomId, userCount, user } = result;
+    if (registrySocket && registrySocket.readyState === WebSocket.OPEN) {
+        await sendOverSocket(registrySocket, event);
+        return;
+    }
 
-            if (userCount > 0) {
-                broadcastToRoom(roomId, {
-                    type: "USER_LEFT",
-                    payload: {
-                        anonymousId: user.anonymousId,
-                        nickname: user.nickname,
-                        userCount,
-                    },
-                });
-            }
+    await publishToProviderRoom(PIEHOST_REGISTRY_ROOM, event);
+}
+
+function parseAllowedOrigins(value: string): string[] | "*" {
+    const trimmed = value.trim();
+    if (trimmed === "*") {
+        return "*";
+    }
+
+    const entries = trimmed
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+    return entries.length === 0 ? "*" : entries;
+}
+
+const app = express();
+const allowedOrigins = parseAllowedOrigins(FRONTEND_ORIGIN);
+
+app.use(express.json({ limit: "512kb" }));
+app.use(
+    cors({
+        origin: allowedOrigins === "*" ? true : allowedOrigins,
+        credentials: false,
+    })
+);
+
+app.get("/health", (_, res) => {
+    res.json({
+        ok: true,
+        service: "chat-backend-api",
+        environment: NODE_ENV,
+        provider: {
+            configured: isProviderConfigured(),
+            connected: providerConnected,
+            clusterId: PIEHOST_CLUSTER_ID || null,
+            registryRoom: PIEHOST_REGISTRY_ROOM,
+        },
+    });
+});
+
+app.get("/config/public", (_, res) => {
+    res.json({
+        clusterId: PIEHOST_CLUSTER_ID || null,
+        registryRoom: PIEHOST_REGISTRY_ROOM,
+    });
+});
+
+app.get("/rooms", (_, res) => {
+    res.json({
+        rooms: listRooms().map((room) => ({ roomId: room.roomId, userCount: room.userCount })),
+    });
+});
+
+app.post("/rooms", async (req, res) => {
+    const nickname = typeof req.body?.nickname === "string" ? req.body.nickname.trim() : "";
+    const anonymousId = typeof req.body?.anonymousId === "string" ? req.body.anonymousId.trim() : "";
+
+    if (!nickname || nickname.length > 30) {
+        res.status(400).json({ error: "Valid nickname is required (max 30 chars)." });
+        return;
+    }
+
+    if (!anonymousId) {
+        res.status(400).json({ error: "anonymousId is required." });
+        return;
+    }
+
+    roomCounter += 1;
+    const roomId = roomCounter;
+
+    rooms.set(roomId, {
+        roomId,
+        userCount: 0,
+        createdAt: new Date().toISOString(),
+    });
+
+    try {
+        await publishRegistryEvent({
+            event: "room_created",
+            data: { roomId, nickname, anonymousId },
+        });
+    } catch (error) {
+        console.warn(`[Provider] Failed to publish room_created event: ${String(error)}`);
+    }
+
+    res.status(201).json({ roomId });
+});
+
+app.post("/rooms/:roomId/count", async (req, res) => {
+    const roomId = Number(req.params.roomId);
+    const userCount = Number(req.body?.userCount);
+
+    if (!Number.isFinite(roomId) || roomId <= 0) {
+        res.status(400).json({ error: "roomId must be a positive number." });
+        return;
+    }
+
+    if (!Number.isFinite(userCount) || userCount < 0) {
+        res.status(400).json({ error: "userCount must be a non-negative number." });
+        return;
+    }
+
+    const existing = rooms.get(roomId);
+    if (!existing) {
+        rooms.set(roomId, {
+            roomId,
+            userCount,
+            createdAt: new Date().toISOString(),
+        });
+    } else {
+        existing.userCount = userCount;
+        if (userCount === 0) {
+            rooms.delete(roomId);
         }
-    });
+    }
 
-    socket.on("error", (error) => {
-        console.error(`[Error] ${socketId} socket error: ${formatUnknownError(error)}`);
-    });
+    try {
+        await publishRegistryEvent({
+            event: "room_count_update",
+            data: { roomId, userCount },
+        });
+    } catch (error) {
+        console.warn(`[Provider] Failed to publish room_count_update event: ${String(error)}`);
+    }
+
+    res.json({ success: true });
 });
 
-wss.on("error", (error) => {
-    console.error(`[Error] WebSocket server error: ${formatUnknownError(error)}`);
+app.post("/provider/publish", async (req, res) => {
+    const roomName = typeof req.body?.roomName === "string" ? req.body.roomName.trim() : "";
+    const eventName = typeof req.body?.event === "string" ? req.body.event.trim() : "";
+    const data = req.body?.data;
+
+    if (!roomName) {
+        res.status(400).json({ error: "roomName is required." });
+        return;
+    }
+
+    if (!eventName) {
+        res.status(400).json({ error: "event is required." });
+        return;
+    }
+
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+        res.status(400).json({ error: "data must be a JSON object." });
+        return;
+    }
+
+    try {
+        await publishToProviderRoom(roomName, {
+            event: eventName,
+            data: data as Record<string, unknown>,
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(502).json({ error: `Provider publish failed: ${String(error)}` });
+    }
 });
 
-process.on("uncaughtException", (error) => {
-    console.error(`[Fatal] uncaughtException: ${formatUnknownError(error)}`);
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: `Internal server error: ${message}` });
 });
 
-process.on("unhandledRejection", (reason) => {
-    console.error(`[Fatal] unhandledRejection: ${formatUnknownError(reason)}`);
-});
+if (isProviderConfigured()) {
+    connectRegistrySocket();
+} else {
+    console.warn("[Provider] Missing PIEHOST_CLUSTER_ID or PIEHOST_API_KEY. Provider integration disabled.");
+}
 
-console.log(`
-╔════════════════════════════════════════╗
-║  WebSocket Chat Server Started        ║
-╠════════════════════════════════════════╣
-║  Host: ${HOST.padEnd(30)} ║
-║  Port: ${String(PORT).padEnd(30)} ║
-║  Environment: ${(process.env.NODE_ENV || "development").padEnd(23)} ║
-╚════════════════════════════════════════╝
+app.listen(PORT, HOST, () => {
+    console.log(`
++----------------------------------------+
+�  Chat Backend API Started             �
+�----------------------------------------�
+�  Host: ${HOST.padEnd(30)} �
+�  Port: ${String(PORT).padEnd(30)} �
+�  Environment: ${NODE_ENV.padEnd(23)} �
+�  Provider configured: ${String(isProviderConfigured()).padEnd(13)} �
++----------------------------------------+
 `);
+});
