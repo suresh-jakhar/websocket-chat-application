@@ -344,6 +344,26 @@ input:focus {
 	flex-wrap: wrap;
 }
 
+.mute-btn-content {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.6rem;
+}
+
+.mute-btn-icon {
+	width: 2.5rem;
+	height: 2.5rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mute-btn-icon svg {
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
 .system-feed,
 .messages-list {
 	margin-top: 0.8rem;

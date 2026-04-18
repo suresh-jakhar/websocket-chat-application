@@ -1,6 +1,8 @@
 import type { FormEvent } from "react";
 import { ActionButton } from "../components/ActionButton";
 import { AppInput } from "../components/AppInput";
+import { SoundOffIcon } from "../icons/sound_off";
+import { SoundOnIcon } from "../icons/sound_on";
 import { MessageList } from "../components/MessageList";
 import { SystemFeed } from "../components/SystemFeed";
 import type { MessagePayload } from "../types/chat";
@@ -11,9 +13,11 @@ type ChatPageProps = {
     messages: MessagePayload[];
     systemFeed: string[];
     anonymousId: string;
+    isMuted: boolean;
     messageInput: string;
     onMessageInputChange: (value: string) => void;
     onSendMessage: (event: FormEvent<HTMLFormElement>) => void;
+    onToggleMute: () => void;
     onRequestRooms: () => void;
     onLeaveRoom: () => void;
 };
@@ -24,9 +28,11 @@ export function ChatPage({
     messages,
     systemFeed,
     anonymousId,
+    isMuted,
     messageInput,
     onMessageInputChange,
     onSendMessage,
+    onToggleMute,
     onRequestRooms,
     onLeaveRoom,
 }: ChatPageProps) {
@@ -38,6 +44,14 @@ export function ChatPage({
                     <p>{roomUserCount} users in this room</p>
                 </div>
                 <div className="header-actions">
+                    <ActionButton onClick={onToggleMute} tone="lime">
+                        <span className="mute-btn-content">
+                            <span className="mute-btn-icon" aria-hidden="true">
+                                {isMuted ? <SoundOffIcon /> : <SoundOnIcon />}
+                            </span>
+                            <span>{isMuted ? "Unmute" : "Mute"}</span>
+                        </span>
+                    </ActionButton>
                     <ActionButton onClick={onRequestRooms} tone="pink">
                         Sync Rooms
                     </ActionButton>

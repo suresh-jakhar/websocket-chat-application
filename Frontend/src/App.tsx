@@ -30,6 +30,7 @@ export default function App() {
 	const [messages, setMessages] = useState<MessagePayload[]>([]);
 	const [systemFeed, setSystemFeed] = useState<string[]>([]);
 	const [errorText, setErrorText] = useState("");
+	const [isMuted, setIsMuted] = useState(false);
 	const anonymousId = useMemo(() => generateAnonymousId(), []);
 
 	const sounds = useMemo(
@@ -42,6 +43,9 @@ export default function App() {
 	);
 
 	const playSound = (kind: "incoming" | "outgoing" | "joinLeave") => {
+		if (isMuted) {
+			return;
+		}
 		const audio = sounds[kind];
 		audio.currentTime = 0;
 		void audio.play().catch(() => {
@@ -343,9 +347,11 @@ export default function App() {
 					messages={messages}
 					systemFeed={systemFeed}
 					anonymousId={anonymousId}
+					isMuted={isMuted}
 					messageInput={messageInput}
 					onMessageInputChange={setMessageInput}
 					onSendMessage={sendMessageToRoom}
+					onToggleMute={() => setIsMuted((prev) => !prev)}
 					onRequestRooms={requestRooms}
 					onLeaveRoom={leaveRoom}
 				/>
