@@ -13,6 +13,15 @@
 	position: relative;
 	overflow-x: hidden;
 	padding: 1.25rem;
+	box-sizing: border-box;
+}
+
+.app-root-landing {
+	height: 100dvh;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	padding-bottom: 0;
 }
 
 .bg-shape {
@@ -100,6 +109,13 @@
 	gap: 1rem;
 }
 
+.landing-stage {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+
 .chat-layout {
 	display: grid;
 	grid-template-columns: 300px minmax(0, 1fr);
@@ -157,6 +173,21 @@
 
 .hero-panel p {
 	max-width: 68ch;
+}
+
+.landing-illustration {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: -0.8vh;
+	z-index: 2;
+	display: block;
+	height: 86%;
+	width: auto;
+	max-height: calc(100% + 1rem);
+	max-width: min(88vw, 980px);
+	object-fit: contain;
+	pointer-events: none;
 }
 
 .nickname-form,
@@ -341,6 +372,16 @@ input:focus {
 	.nickname-form,
 	.composer {
 		flex-direction: column;
+	}
+
+	.landing-illustration {
+		left: 50%;
+		transform: translateX(-50%);
+		bottom: -0.4vh;
+		height: 82%;
+		width: auto;
+		max-width: min(96vw, 820px);
+		max-height: calc(100% + 0.5rem);
 	}
 
 	.room-card {

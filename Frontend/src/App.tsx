@@ -9,6 +9,7 @@ import { StatusStrip } from "./components/StatusStrip";
 import { ChatPage } from "./pages/ChatPage";
 import { HomePage } from "./pages/HomePage";
 import { NicknamePage } from "./pages/NicknamePage";
+import peopleIllustration from "./assets/hii_from_3_perople.svg";
 import type { IncomingServerMessage, MessagePayload, RoomSummary, ConnectionStatus } from "./types/chat";
 import { generateAnonymousId } from "./utils/chat";
 
@@ -300,18 +301,23 @@ export default function App() {
 		setMessageInput("");
 	};
 
+	const isLanding = !nickname;
+
 	return (
-		<main className="app-root">
+		<main className={`app-root${isLanding ? " app-root-landing" : ""}`}>
 			<BackgroundShapes />
 			<StatusStrip status={connectionStatus} anonymousId={anonymousId} />
 
-			{!nickname ? (
-				<NicknamePage
-					nicknameInput={nicknameInput}
-					onNicknameInputChange={setNicknameInput}
-					onSaveNickname={saveNickname}
-					nicknameInputRef={nicknameInputRef}
-				/>
+			{isLanding ? (
+				<div className="landing-stage">
+					<NicknamePage
+						nicknameInput={nicknameInput}
+						onNicknameInputChange={setNicknameInput}
+						onSaveNickname={saveNickname}
+						nicknameInputRef={nicknameInputRef}
+					/>
+					<img className="landing-illustration" src={peopleIllustration} alt="Three people waving" />
+				</div>
 			) : currentRoomId === null ? (
 				<HomePage
 					nickname={nickname}

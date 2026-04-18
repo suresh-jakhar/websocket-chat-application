@@ -13,7 +13,7 @@ export function NicknamePage({ nicknameInput, onNicknameInputChange, onSaveNickn
     return (
         <section className="panel hero-panel">
             <h1>Room Chat</h1>
-            <p>Enter your name to start chatting and join numbered rooms.</p>
+            
 
             <form onSubmit={onSaveNickname} className="nickname-form">
                 <AppInput
