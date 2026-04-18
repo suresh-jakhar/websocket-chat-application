@@ -10,16 +10,43 @@ import { ChatPage } from "./pages/ChatPage";
 import { HomePage } from "./pages/HomePage";
 import { NicknamePage } from "./pages/NicknamePage";
 import peopleIllustration from "./assets/hii_from_3_perople.svg";
-import type { IncomingServerMessage, MessagePayload, RoomSummary, ConnectionStatus } from "./types/chat";
+import type { MessagePayload, RoomSummary, ConnectionStatus } from "./types/chat";
 import { generateAnonymousId } from "./utils/chat";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
+const PIEHOST_CLUSTER_ID = import.meta.env.VITE_PIEHOST_CLUSTER_ID ?? "";
+const PIEHOST_API_KEY = import.meta.env.VITE_PIEHOST_API_KEY ?? "";
+const PIEHOST_REGISTRY_ROOM = import.meta.env.VITE_PIEHOST_REGISTRY_ROOM ?? "rooms_registry";
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080").replace(/\/$/, "");
+
+type PieMessage = {
+	event?: string;
+	data?: unknown;
+	meta?: unknown;
+	system?: {
+		connection_count?: number;
+	};
+};
+
+function toRoomName(roomId: number): string {
+	return `room-${roomId}`;
+}
+
+function buildPieUrl(roomName: string, anonymousId: string): string {
+	const clusterId = PIEHOST_CLUSTER_ID.trim();
+	const apiKey = PIEHOST_API_KEY.trim();
+	const room = encodeURIComponent(roomName);
+	const user = encodeURIComponent(anonymousId);
+	return `wss://${clusterId}.piesocket.com/v3/${room}?api_key=${apiKey}&notify_self=1&presence=1&user=${user}`;
+}
 
 export default function App() {
-	const socketRef = useRef<WebSocket | null>(null);
+	const registrySocketRef = useRef<WebSocket | null>(null);
+	const roomSocketRef = useRef<WebSocket | null>(null);
 	const roomsPollRef = useRef<number | null>(null);
 	const nicknameInputRef = useRef<HTMLInputElement | null>(null);
 	const nicknameRef = useRef("");
+	const currentRoomRef = useRef<number | null>(null);
+	const [roomJoinVersion, setRoomJoinVersion] = useState(0);
 	const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
 	const [nicknameInput, setNicknameInput] = useState("");
 	const [nickname, setNickname] = useState("");
@@ -53,149 +80,164 @@ export default function App() {
 		});
 	};
 
-	const sendSocketMessage = (message: object) => {
-		const socket = socketRef.current;
+	const emitPieMessage = (socket: WebSocket | null, message: PieMessage, socketErrorText: string) => {
 		if (!socket || socket.readyState !== WebSocket.OPEN) {
-			setErrorText("Socket is not connected right now.");
-			return;
+			setErrorText(socketErrorText);
+			return false;
 		}
 		socket.send(JSON.stringify(message));
+		return true;
+	};
+
+	const updateRoomInList = (roomId: number, userCount: number) => {
+		setRooms((prev) => {
+			const next = [...prev];
+			const existingIndex = next.findIndex((room) => room.roomId === roomId);
+			if (userCount <= 0) {
+				if (existingIndex >= 0) {
+					next.splice(existingIndex, 1);
+				}
+				return next.sort((a, b) => a.roomId - b.roomId);
+			}
+
+			if (existingIndex >= 0) {
+				next[existingIndex] = { roomId, userCount };
+			} else {
+				next.push({ roomId, userCount });
+			}
+
+			return next.sort((a, b) => a.roomId - b.roomId);
+		});
+	};
+
+	const requestCurrentRoomStatus = () => {
+		const socket = roomSocketRef.current;
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return;
+		}
+		socket.send("cmd_status");
+	};
+
+	const fetchRoomsFromBackend = async () => {
+		try {
+			const response = await fetch(`${BACKEND_URL}/rooms`);
+			if (!response.ok) {
+				throw new Error(`Unable to fetch rooms (${response.status})`);
+			}
+			const payload = (await response.json()) as { rooms?: RoomSummary[] };
+			const safeRooms = (payload.rooms ?? [])
+				.filter((room) => Number.isFinite(room.roomId) && Number.isFinite(room.userCount))
+				.sort((a, b) => a.roomId - b.roomId);
+			setRooms(safeRooms);
+		} catch {
+			refreshKnownRooms();
+		}
+	};
+
+	const syncRoomCountToBackend = async (roomId: number, userCount: number) => {
+		try {
+			await fetch(`${BACKEND_URL}/rooms/${roomId}/count`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ userCount }),
+			});
+		} catch {
+			return;
+		}
+	};
+
+	const announceRoomCountToRegistry = (roomId: number, userCount: number) => {
+		void syncRoomCountToBackend(roomId, userCount);
+	};
+
+	const refreshKnownRooms = () => {
+		const roomIds = rooms.map((room) => room.roomId);
+		if (currentRoomRef.current !== null && !roomIds.includes(currentRoomRef.current)) {
+			roomIds.push(currentRoomRef.current);
+		}
+
+		const uniqueRoomIds = [...new Set(roomIds)];
+		if (uniqueRoomIds.length === 0) {
+			return;
+		}
+
+		uniqueRoomIds.forEach((roomId) => {
+			const statusSocket = new WebSocket(buildPieUrl(toRoomName(roomId), anonymousId));
+			let responded = false;
+
+			statusSocket.onopen = () => {
+				statusSocket.send("cmd_status");
+			};
+
+			statusSocket.onmessage = (event) => {
+				let parsed: PieMessage;
+				try {
+					parsed = JSON.parse(event.data.toString()) as PieMessage;
+				} catch {
+					return;
+				}
+
+				const count = parsed.system?.connection_count;
+				if (typeof count === "number") {
+					responded = true;
+					updateRoomInList(roomId, count);
+					statusSocket.close();
+				}
+			};
+
+			statusSocket.onerror = () => {
+				statusSocket.close();
+			};
+
+			window.setTimeout(() => {
+				if (!responded && statusSocket.readyState === WebSocket.OPEN) {
+					statusSocket.close();
+				}
+			}, 1500);
+		});
 	};
 
 	const requestRooms = () => {
-		sendSocketMessage({ type: "GET_ROOMS", payload: {} });
+		void fetchRoomsFromBackend();
 	};
 
-	const connectSocket = () => {
+	const connectRegistrySocket = () => {
 		setConnectionStatus("connecting");
-		const socket = new WebSocket(WS_URL);
-		socketRef.current = socket;
+		const socket = new WebSocket(buildPieUrl(PIEHOST_REGISTRY_ROOM, anonymousId));
+		registrySocketRef.current = socket;
 
 		socket.onopen = () => {
 			setConnectionStatus("connected");
 			setErrorText("");
-			requestRooms();
+			void fetchRoomsFromBackend();
 		};
 
 		socket.onmessage = (event) => {
-			let parsed: IncomingServerMessage;
+			let parsed: PieMessage;
 			try {
-				parsed = JSON.parse(event.data.toString()) as IncomingServerMessage;
+				parsed = JSON.parse(event.data.toString()) as PieMessage;
 			} catch {
 				return;
 			}
 
-			const payload = parsed.payload ?? {};
-
-			if (parsed.type === "ROOM_LIST") {
-				const roomList = (payload.rooms as RoomSummary[] | undefined) ?? [];
-				const safeRooms = roomList
-					.filter((room) => Number.isFinite(room.roomId) && Number.isFinite(room.userCount))
-					.sort((a, b) => a.roomId - b.roomId);
-				setRooms(safeRooms);
-				return;
-			}
-
-			if (parsed.type === "ROOM_CREATED") {
-				const roomId = payload.roomId as number | undefined;
+			if (parsed.event === "room_created" && parsed.data && typeof parsed.data === "object") {
+				const payload = parsed.data as Record<string, unknown>;
+				const roomId = payload.roomId;
 				if (typeof roomId === "number") {
-					const currentNickname = nicknameRef.current.trim();
-					if (!currentNickname) {
-						setErrorText("Enter your name first.");
-						return;
-					}
-					sendSocketMessage({
-						type: "JOIN_ROOM",
-						payload: {
-							roomId,
-							anonymousId,
-							nickname: currentNickname,
-						},
-					});
+					updateRoomInList(roomId, 1);
 				}
 				return;
 			}
 
-			if (parsed.type === "ROOM_JOINED") {
-				const roomId = payload.roomId as number | undefined;
-				const userCount = payload.userCount as number | undefined;
-				if (typeof roomId === "number") {
-					setCurrentRoomId(roomId);
-					setRoomUserCount(typeof userCount === "number" ? userCount : 0);
-					setMessages([]);
-					setSystemFeed([`You joined Room ${roomId}.`]);
-					playSound("joinLeave");
-					requestRooms();
+			if (parsed.event === "room_count_update" && parsed.data && typeof parsed.data === "object") {
+				const payload = parsed.data as Record<string, unknown>;
+				const roomId = payload.roomId;
+				const userCount = payload.userCount;
+				if (typeof roomId === "number" && typeof userCount === "number") {
+					updateRoomInList(roomId, userCount);
 				}
-				return;
-			}
-
-			if (parsed.type === "USER_JOINED") {
-				const joinedBy = payload.nickname as string | undefined;
-				const userCount = payload.userCount as number | undefined;
-				if (typeof userCount === "number") {
-					setRoomUserCount(userCount);
-				}
-				if (joinedBy) {
-					setSystemFeed((prev) => [...prev.slice(-14), `${joinedBy} joined the room.`]);
-					playSound("joinLeave");
-				}
-				requestRooms();
-				return;
-			}
-
-			if (parsed.type === "USER_LEFT") {
-				const leftBy = payload.nickname as string | undefined;
-				const userCount = payload.userCount as number | undefined;
-				if (typeof userCount === "number") {
-					setRoomUserCount(userCount);
-				}
-				if (leftBy) {
-					setSystemFeed((prev) => [...prev.slice(-14), `${leftBy} left the room.`]);
-				}
-				playSound("joinLeave");
-				requestRooms();
-				return;
-			}
-
-			if (parsed.type === "MESSAGE") {
-				const chatPayload = payload as Partial<MessagePayload>;
-				if (!chatPayload.message || !chatPayload.nickname || !chatPayload.anonymousId || !chatPayload.timestamp) {
-					return;
-				}
-
-				const normalized: MessagePayload = {
-					anonymousId: chatPayload.anonymousId,
-					nickname: chatPayload.nickname,
-					message: chatPayload.message,
-					timestamp: chatPayload.timestamp,
-				};
-
-				setMessages((prev) => [...prev, normalized]);
-
-				if (normalized.anonymousId === anonymousId) {
-					return;
-				}
-				playSound("incoming");
-				return;
-			}
-
-			if (parsed.type === "SUCCESS") {
-				const message = payload.message as string | undefined;
-				if (message === "Left room") {
-					setCurrentRoomId(null);
-					setRoomUserCount(0);
-					setMessages([]);
-					setSystemFeed([]);
-					playSound("joinLeave");
-					requestRooms();
-				}
-				return;
-			}
-
-			if (parsed.type === "ERROR") {
-				const error = payload.error as string | undefined;
-				setErrorText(error ?? "Unknown socket error");
 			}
 		};
 
@@ -208,11 +250,137 @@ export default function App() {
 		};
 	};
 
+	const closeCurrentRoomSocket = () => {
+		if (roomSocketRef.current) {
+			roomSocketRef.current.close();
+			roomSocketRef.current = null;
+		}
+	};
+
+	const joinRoomSocket = (roomId: number) => {
+		closeCurrentRoomSocket();
+		currentRoomRef.current = roomId;
+
+		const socket = new WebSocket(buildPieUrl(toRoomName(roomId), anonymousId));
+		roomSocketRef.current = socket;
+
+		socket.onopen = () => {
+			setCurrentRoomId(roomId);
+			setRoomUserCount(1);
+			setMessages([]);
+			setSystemFeed([`You joined Room ${roomId}.`]);
+			playSound("joinLeave");
+
+			emitPieMessage(
+				socket,
+				{
+					event: "user_joined",
+					data: {
+						roomId,
+						anonymousId,
+						nickname: nicknameRef.current,
+					},
+				},
+				"Unable to send join signal."
+			);
+
+			requestCurrentRoomStatus();
+			announceRoomCountToRegistry(roomId, 1);
+		};
+
+		socket.onmessage = (event) => {
+			let parsed: PieMessage;
+			try {
+				parsed = JSON.parse(event.data.toString()) as PieMessage;
+			} catch {
+				return;
+			}
+
+			if (typeof parsed.system?.connection_count === "number") {
+				const connectionCount = parsed.system.connection_count;
+				setRoomUserCount(connectionCount);
+				if (currentRoomRef.current !== null) {
+					announceRoomCountToRegistry(currentRoomRef.current, connectionCount);
+				}
+				return;
+			}
+
+			if (!parsed.event || !parsed.data || typeof parsed.data !== "object") {
+				return;
+			}
+
+			const payload = parsed.data as Record<string, unknown>;
+
+			if (parsed.event === "user_joined") {
+				const joinedBy = payload.nickname;
+				const joinedByAnon = payload.anonymousId;
+				if (typeof joinedBy === "string" && joinedByAnon !== anonymousId) {
+					setSystemFeed((prev) => [...prev.slice(-14), `${joinedBy} joined the room.`]);
+					playSound("joinLeave");
+				}
+				requestCurrentRoomStatus();
+				return;
+			}
+
+			if (parsed.event === "user_left") {
+				const leftBy = payload.nickname;
+				if (typeof leftBy === "string") {
+					setSystemFeed((prev) => [...prev.slice(-14), `${leftBy} left the room.`]);
+					playSound("joinLeave");
+				}
+				requestCurrentRoomStatus();
+				return;
+			}
+
+			if (parsed.event === "chat_message") {
+				const message = payload.message;
+				const senderId = payload.anonymousId;
+				const senderName = payload.nickname;
+				const timestamp = payload.timestamp;
+
+				if (
+					typeof message !== "string" ||
+					typeof senderId !== "string" ||
+					typeof senderName !== "string" ||
+					typeof timestamp !== "string"
+				) {
+					return;
+				}
+
+				const normalized: MessagePayload = {
+					anonymousId: senderId,
+					nickname: senderName,
+					message,
+					timestamp,
+				};
+
+				setMessages((prev) => [...prev, normalized]);
+				if (normalized.anonymousId !== anonymousId) {
+					playSound("incoming");
+				}
+			}
+		};
+
+		socket.onclose = () => {
+			roomSocketRef.current = null;
+		};
+
+		socket.onerror = () => {
+			setErrorText("Room connection failed.");
+		};
+	};
+
 	useEffect(() => {
-		connectSocket();
+		if (!PIEHOST_CLUSTER_ID || !PIEHOST_API_KEY) {
+			setConnectionStatus("disconnected");
+			setErrorText("PieHost env vars are missing. Set VITE_PIEHOST_CLUSTER_ID and VITE_PIEHOST_API_KEY.");
+			return;
+		}
+
+		connectRegistrySocket();
 
 		roomsPollRef.current = window.setInterval(() => {
-			if (socketRef.current?.readyState === WebSocket.OPEN) {
+			if (registrySocketRef.current?.readyState === WebSocket.OPEN) {
 				requestRooms();
 			}
 		}, 3000);
@@ -221,7 +389,8 @@ export default function App() {
 			if (roomsPollRef.current) {
 				window.clearInterval(roomsPollRef.current);
 			}
-			socketRef.current?.close();
+			registrySocketRef.current?.close();
+			roomSocketRef.current?.close();
 		};
 	}, []);
 
@@ -242,6 +411,13 @@ export default function App() {
 	useEffect(() => {
 		nicknameRef.current = nickname;
 	}, [nickname]);
+
+	useEffect(() => {
+		if (currentRoomRef.current === null) {
+			return;
+		}
+		requestCurrentRoomStatus();
+	}, [roomJoinVersion]);
 
 	const saveNickname = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
@@ -266,13 +442,38 @@ export default function App() {
 			setErrorText("Enter your name first.");
 			return;
 		}
-		sendSocketMessage({
-			type: "CREATE_ROOM",
-			payload: {
-				anonymousId,
-				nickname,
-			},
-		});
+
+		void (async () => {
+			try {
+				const response = await fetch(`${BACKEND_URL}/rooms`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						nickname,
+						anonymousId,
+					}),
+				});
+
+				if (!response.ok) {
+					const payload = (await response.json().catch(() => ({}))) as { error?: string };
+					setErrorText(payload.error ?? "Unable to create room right now.");
+					return;
+				}
+
+				const payload = (await response.json()) as { roomId?: number };
+				if (typeof payload.roomId !== "number") {
+					setErrorText("Room creation returned an invalid response.");
+					return;
+				}
+
+				updateRoomInList(payload.roomId, 1);
+				joinRoom(payload.roomId);
+			} catch {
+				setErrorText("Unable to reach backend for room creation.");
+			}
+		})();
 	};
 
 	const joinRoom = (roomId: number) => {
@@ -280,23 +481,38 @@ export default function App() {
 			setErrorText("Enter your name first.");
 			return;
 		}
-		sendSocketMessage({
-			type: "JOIN_ROOM",
-			payload: {
-				roomId,
-				anonymousId,
-				nickname,
-			},
-		});
+		setRoomJoinVersion((prev) => prev + 1);
+		joinRoomSocket(roomId);
 	};
 
 	const leaveRoom = () => {
-		sendSocketMessage({
-			type: "LEAVE_ROOM",
-			payload: {
-				roomId: currentRoomId,
+		const roomId = currentRoomRef.current;
+		if (roomId === null) {
+			return;
+		}
+
+		emitPieMessage(
+			roomSocketRef.current,
+			{
+				event: "user_left",
+				data: {
+					roomId,
+					anonymousId,
+					nickname: nicknameRef.current,
+				},
 			},
-		});
+			"Unable to signal room leave."
+		);
+
+		closeCurrentRoomSocket();
+		currentRoomRef.current = null;
+		setCurrentRoomId(null);
+		setRoomUserCount(0);
+		setMessages([]);
+		setSystemFeed([]);
+		playSound("joinLeave");
+		announceRoomCountToRegistry(roomId, 0);
+		requestRooms();
 	};
 
 	const sendMessageToRoom = (event: FormEvent<HTMLFormElement>) => {
@@ -306,12 +522,22 @@ export default function App() {
 			return;
 		}
 		playSound("outgoing");
-		sendSocketMessage({
-			type: "SEND_MESSAGE",
-			payload: {
-				message: trimmed,
+		const sent = emitPieMessage(
+			roomSocketRef.current,
+			{
+				event: "chat_message",
+				data: {
+					anonymousId,
+					nickname,
+					message: trimmed,
+					timestamp: new Date().toISOString(),
+				},
 			},
-		});
+			"Room is not connected right now."
+		);
+		if (!sent) {
+			return;
+		}
 		setMessageInput("");
 	};
 
