@@ -9,6 +9,7 @@ config();
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const NODE_ENV = process.env.NODE_ENV ?? "development";
+const IS_VERCEL = process.env.VERCEL === "1";
 const PIEHOST_CLUSTER_ID = process.env.PIEHOST_CLUSTER_ID ?? "";
 const PIEHOST_API_KEY = process.env.PIEHOST_API_KEY ?? "";
 const PIEHOST_REGISTRY_ROOM = process.env.PIEHOST_REGISTRY_ROOM ?? "rooms_registry";
@@ -345,14 +346,17 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
     res.status(500).json({ error: `Internal server error: ${message}` });
 });
 
-if (isProviderConfigured()) {
+if (isProviderConfigured() && !IS_VERCEL) {
     connectRegistrySocket();
 } else {
-    console.warn("[Provider] Missing PIEHOST_CLUSTER_ID or PIEHOST_API_KEY. Provider integration disabled.");
+    if (!isProviderConfigured()) {
+        console.warn("[Provider] Missing PIEHOST_CLUSTER_ID or PIEHOST_API_KEY. Provider integration disabled.");
+    }
 }
 
-app.listen(PORT, HOST, () => {
-    console.log(`
+if (!IS_VERCEL) {
+    app.listen(PORT, HOST, () => {
+        console.log(`
 +----------------------------------------+
 �  Chat Backend API Started             �
 �----------------------------------------�
@@ -362,4 +366,7 @@ app.listen(PORT, HOST, () => {
 �  Provider configured: ${String(isProviderConfigured()).padEnd(13)} �
 +----------------------------------------+
 `);
-});
+    });
+}
+
+export default app;
