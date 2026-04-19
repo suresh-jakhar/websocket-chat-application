@@ -10,12 +10,31 @@ const PORT = parseInt(process.env.PORT ?? "8080", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const IS_VERCEL = process.env.VERCEL === "1";
-const PIEHOST_CLUSTER_ID = (process.env.PIEHOST_CLUSTER_ID ?? process.env.VITE_PIEHOST_CLUSTER_ID ?? "").trim();
-const PIEHOST_API_KEY = (process.env.PIEHOST_API_KEY ?? process.env.VITE_PIEHOST_API_KEY ?? "").trim();
-const PIEHOST_REGISTRY_ROOM =
-    (process.env.PIEHOST_REGISTRY_ROOM ?? process.env.VITE_PIEHOST_REGISTRY_ROOM ?? "rooms_registry").trim() ||
-    "rooms_registry";
-const FRONTEND_ORIGIN = (process.env.FRONTEND_ORIGIN ?? "*").trim() || "*";
+
+function resolveEnvValue(keys: string[], fallback = ""): { value: string; source: string | null } {
+    for (const key of keys) {
+        const raw = process.env[key];
+        if (typeof raw === "string" && raw.trim().length > 0) {
+            return { value: raw.trim(), source: key };
+        }
+    }
+
+    const trimmedFallback = fallback.trim();
+    return {
+        value: trimmedFallback,
+        source: trimmedFallback.length > 0 ? "default" : null,
+    };
+}
+
+const piehostCluster = resolveEnvValue(["PIEHOST_CLUSTER_ID", "VITE_PIEHOST_CLUSTER_ID"]);
+const piehostApiKey = resolveEnvValue(["PIEHOST_API_KEY", "VITE_PIEHOST_API_KEY"]);
+const piehostRegistryRoom = resolveEnvValue(["PIEHOST_REGISTRY_ROOM", "VITE_PIEHOST_REGISTRY_ROOM"], "rooms_registry");
+const frontendOrigin = resolveEnvValue(["FRONTEND_ORIGIN"], "*");
+
+const PIEHOST_CLUSTER_ID = piehostCluster.value;
+const PIEHOST_API_KEY = piehostApiKey.value;
+const PIEHOST_REGISTRY_ROOM = piehostRegistryRoom.value || "rooms_registry";
+const FRONTEND_ORIGIN = frontendOrigin.value || "*";
 const PROVIDER_USER_ID = "backend-service";
 
 type RoomState = {
@@ -215,10 +234,22 @@ app.get("/health", (_, res) => {
             connected: providerConnected,
             clusterId: PIEHOST_CLUSTER_ID || null,
             registryRoom: PIEHOST_REGISTRY_ROOM,
+            diagnostics: {
+                clusterSource: piehostCluster.source,
+                apiKeySource: piehostApiKey.source,
+                registryRoomSource: piehostRegistryRoom.source,
+                apiKeyPresent: PIEHOST_API_KEY.length > 0,
+            },
         },
         cors: {
             frontendOriginConfig: FRONTEND_ORIGIN,
             allowedOrigins,
+            source: frontendOrigin.source,
+        },
+        runtime: {
+            isVercel: IS_VERCEL,
+            vercelEnv: process.env.VERCEL_ENV ?? null,
+            region: process.env.VERCEL_REGION ?? null,
         },
     });
 });
@@ -352,7 +383,12 @@ if (isProviderConfigured() && !IS_VERCEL) {
     connectRegistrySocket();
 } else {
     if (!isProviderConfigured()) {
-        console.warn("[Provider] Missing PIEHOST_CLUSTER_ID or PIEHOST_API_KEY. Provider integration disabled.");
+        console.warn("[Provider] Missing PIEHOST_CLUSTER_ID/PIEHOST_API_KEY (or VITE_* fallback names). Provider integration disabled.");
+        console.warn(
+            `[Provider] Env presence => PIEHOST_CLUSTER_ID:${Boolean(process.env.PIEHOST_CLUSTER_ID)} VITE_PIEHOST_CLUSTER_ID:${Boolean(
+                process.env.VITE_PIEHOST_CLUSTER_ID
+            )} PIEHOST_API_KEY:${Boolean(process.env.PIEHOST_API_KEY)} VITE_PIEHOST_API_KEY:${Boolean(process.env.VITE_PIEHOST_API_KEY)}`
+        );
     }
 }
 
