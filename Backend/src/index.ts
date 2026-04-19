@@ -10,10 +10,12 @@ const PORT = parseInt(process.env.PORT ?? "8080", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const IS_VERCEL = process.env.VERCEL === "1";
-const PIEHOST_CLUSTER_ID = process.env.PIEHOST_CLUSTER_ID ?? "";
-const PIEHOST_API_KEY = process.env.PIEHOST_API_KEY ?? "";
-const PIEHOST_REGISTRY_ROOM = process.env.PIEHOST_REGISTRY_ROOM ?? "rooms_registry";
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "*";
+const PIEHOST_CLUSTER_ID = (process.env.PIEHOST_CLUSTER_ID ?? process.env.VITE_PIEHOST_CLUSTER_ID ?? "").trim();
+const PIEHOST_API_KEY = (process.env.PIEHOST_API_KEY ?? process.env.VITE_PIEHOST_API_KEY ?? "").trim();
+const PIEHOST_REGISTRY_ROOM =
+    (process.env.PIEHOST_REGISTRY_ROOM ?? process.env.VITE_PIEHOST_REGISTRY_ROOM ?? "rooms_registry").trim() ||
+    "rooms_registry";
+const FRONTEND_ORIGIN = (process.env.FRONTEND_ORIGIN ?? "*").trim() || "*";
 const PROVIDER_USER_ID = "backend-service";
 
 type RoomState = {
