@@ -12,7 +12,7 @@
 	color: var(--ink);
 	position: relative;
 	overflow-x: hidden;
-	padding: 1.25rem;
+	padding: clamp(0.75rem, 2.4vw, 1.25rem);
 	box-sizing: border-box;
 }
 
@@ -364,7 +364,7 @@ input:focus {
 	height: 1.9rem;
 	padding: 0 0.45rem;
 	margin-left: 0.2rem;
-	margin-right: 3rem;
+	margin-right: 0;
 	border: 1px solid #000;
 	border-radius: 999px;
 	background: var(--cyan);
@@ -594,15 +594,17 @@ input:focus {
 @media (max-width: 980px) {
 	.chat-layout {
 		grid-template-columns: 1fr;
+		grid-template-rows: minmax(120px, 28dvh) minmax(0, 1fr);
 		grid-template-areas:
-			"head"
 			"feed"
 			"chat";
+		height: calc(100dvh - 8.5rem);
 	}
 
-	.chat-header {
-		align-items: flex-start;
-		flex-direction: column;
+	.feed-panel,
+	.messages-panel {
+		height: auto;
+		min-height: 0;
 	}
 
 	.home-stage {
@@ -622,6 +624,9 @@ input:focus {
 		left: 0.75rem;
 		top: 0.15rem;
 		font-size: clamp(1.7rem, 10vw, 3.1rem);
+		text-align: left;
+		transform: none;
+		width: calc(100% - 1.5rem);
 	}
 
 	.message-item {
@@ -642,6 +647,25 @@ input:focus {
 		flex-direction: column;
 	}
 
+	.chat-panel-top {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 0.65rem;
+	}
+
+	.chat-room-title {
+		white-space: normal;
+	}
+
+	.chat-panel-top .header-actions {
+		width: 100%;
+		flex-wrap: wrap;
+	}
+
+	.chat-room-count {
+		margin-left: 0;
+	}
+
 	.landing-illustration {
 		left: 50%;
 		transform: translateX(-50%);
@@ -655,5 +679,137 @@ input:focus {
 	.room-card {
 		flex-direction: column;
 		align-items: flex-start;
+	}
+}
+
+@media (max-width: 760px) {
+	.app-root-landing {
+		height: auto;
+		min-height: 100dvh;
+		overflow: visible;
+	}
+
+	.panel {
+		padding: 0.8rem;
+	}
+
+	.home-stage {
+		height: auto;
+		min-height: calc(100dvh - 5.75rem);
+		overflow: visible;
+	}
+
+	.home-stack {
+		padding-top: clamp(2rem, 9vh, 4rem);
+	}
+
+	.home-backdrop {
+		position: static;
+		left: auto;
+		top: auto;
+		width: 100%;
+		margin: 0.9rem 0 0.45rem;
+	}
+
+	.landing-stage {
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-start;
+		overflow: visible;
+		padding-top: 0.5rem;
+		padding-bottom: 1rem;
+		gap: 1rem;
+		background:
+			radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.26) 0 12%, transparent 13%),
+			radial-gradient(circle at 84% 34%, rgba(255, 255, 255, 0.18) 0 10%, transparent 11%),
+			radial-gradient(circle at 8% 78%, rgba(255, 241, 130, 0.55) 0 10%, transparent 11%),
+			radial-gradient(circle at 92% 58%, rgba(185, 169, 255, 0.75) 0 9%, transparent 10%),
+			linear-gradient(135deg, rgba(23, 20, 29, 0.04) 0 2px, transparent 2px 100%);
+		background-size: auto, auto, auto, auto, 14px 14px;
+	}
+
+	.landing-illustration {
+		position: static;
+		left: auto;
+		transform: none;
+		height: auto;
+		width: min(86vw, 380px);
+		max-height: 46dvh;
+		max-width: 100%;
+		margin: 0.25rem auto 0;
+	}
+
+	.message-item {
+		min-width: 0;
+		max-width: 92%;
+	}
+
+	.nickname-form .action-btn,
+	.messages-panel .composer .action-btn {
+		width: 100%;
+	}
+
+	.messages-panel .composer {
+		flex-direction: row;
+		align-items: stretch;
+	}
+
+	.messages-panel .composer input {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.messages-panel .composer .action-btn {
+		width: auto;
+		min-width: 6.5rem;
+	}
+
+	.chat-panel-top .header-actions {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		width: 100%;
+		padding-bottom: 0.1rem;
+		scrollbar-width: none;
+	}
+
+	.chat-panel-top .header-actions::-webkit-scrollbar {
+		display: none;
+	}
+
+	.chat-panel-top .header-actions > * {
+		flex: 0 0 auto;
+	}
+}
+
+@media (max-width: 480px) {
+	.status-strip {
+		padding: 0.5rem 0.6rem;
+		box-shadow: 4px 4px 0 #000;
+	}
+
+	.status-pill,
+	.env-pill {
+		font-size: 0.65rem;
+	}
+
+	.chat-layout {
+		grid-template-rows: minmax(100px, 24dvh) minmax(0, 1fr);
+		gap: 0.6rem;
+	}
+
+	.chat-room-title {
+		font-size: 1rem;
+	}
+
+	.header-actions .action-btn {
+		padding: 0.3rem 0.45rem;
+		font-size: 0.85rem;
+	}
+
+	.error-toast {
+		left: 0.75rem;
+		right: 0.75rem;
+		bottom: 0.75rem;
+		max-width: none;
 	}
 }
